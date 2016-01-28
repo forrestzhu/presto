@@ -11,5 +11,17 @@
 
     <artifactId>presto-odps</artifactId>
 
+    <dependencies>
+        <dependency>
+            <groupId>com.aliyun.odps</groupId>
+            <artifactId>odps-sdk-core</artifactId>
+            <version>0.21.1</version>
+        </dependency>
+        <dependency>
+            <groupId>com.aliyun.odps</groupId>
+            <artifactId>odps-sdk-core-internal</artifactId>
+            <version>0.21.1</version>
+        </dependency>
+    </dependencies>
 
 </project>
