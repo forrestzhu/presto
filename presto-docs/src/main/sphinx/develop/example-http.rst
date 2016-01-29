@@ -38,7 +38,7 @@ include them in the plugin assembly.
 
 There are a few other dependencies that are provided by Presto such
 as ``javax.inject`` and Jackson. In particular, Jackson is used for
-serializing handles and thus plugins must use the verison provided
+serializing handles and thus plugins must use the version provided
 by Presto.
 
 All other dependencies are based on what the plugin needs for its
