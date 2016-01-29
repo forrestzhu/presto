@@ -1,4 +1,4 @@
-package com.facebook.presto.odps;
+package com.facebook.presto.odps.client;
 
 import java.util.Map;
 

@@ -1,4 +1,4 @@
-package com.facebook.presto.odps;
+package com.facebook.presto.odps.metadata;
 
 import com.facebook.presto.spi.ColumnHandle;
 import com.facebook.presto.spi.ColumnMetadata;
@@ -23,6 +23,8 @@ import java.util.Set;
  */
 public class OdpsConnectorMetadata implements ConnectorMetadata
 {
+
+
     /**
      * Returns the schemas provided by this connector.
      *
@@ -41,7 +43,7 @@ public class OdpsConnectorMetadata implements ConnectorMetadata
      * @param tableName
      */
     @Override
-    public ConnectorTableHandle getTableHandle(ConnectorSession session, SchemaTableName tableName)
+    public OdpsConnectorTableHandle getTableHandle(ConnectorSession session, SchemaTableName tableName)
     {
         return null;
     }

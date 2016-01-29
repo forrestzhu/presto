@@ -1,16 +1,25 @@
-package com.facebook.presto.odps;
+package com.facebook.presto.odps.connector;
 
+import com.facebook.presto.odps.metadata.OdpsConnectorMetadata;
 import com.facebook.presto.spi.connector.Connector;
-import com.facebook.presto.spi.connector.ConnectorMetadata;
 import com.facebook.presto.spi.connector.ConnectorSplitManager;
 import com.facebook.presto.spi.connector.ConnectorTransactionHandle;
 import com.facebook.presto.spi.transaction.IsolationLevel;
+import com.google.inject.Inject;
 
 /**
  * @author chengzhi on 16/1/29.
  */
 public class OdpsConnector implements Connector
 {
+
+    private final OdpsConnectorMetadata metadata;
+
+    @Inject
+    public OdpsConnector(OdpsConnectorMetadata metadata)
+    {
+        this.metadata = metadata;
+    }
 
     @Override
     public ConnectorTransactionHandle beginTransaction(IsolationLevel isolationLevel, boolean readOnly)
@@ -26,7 +35,7 @@ public class OdpsConnector implements Connector
     @Override
     public OdpsConnectorMetadata getMetadata(ConnectorTransactionHandle transactionHandle)
     {
-        return null;
+        return metadata;
     }
 
     @Override

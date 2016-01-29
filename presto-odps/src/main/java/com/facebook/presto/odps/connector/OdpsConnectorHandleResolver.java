@@ -1,4 +1,4 @@
-package com.facebook.presto.odps;
+package com.facebook.presto.odps.connector;
 
 import com.facebook.presto.spi.ColumnHandle;
 import com.facebook.presto.spi.ConnectorHandleResolver;

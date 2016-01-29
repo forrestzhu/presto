@@ -1,4 +1,4 @@
-package com.facebook.presto.odps;
+package com.facebook.presto.odps.connector;
 
 import com.facebook.presto.odps.constants.Constants;
 import com.facebook.presto.spi.connector.ConnectorFactory;
