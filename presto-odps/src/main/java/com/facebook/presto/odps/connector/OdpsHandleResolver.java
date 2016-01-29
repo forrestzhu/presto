@@ -9,7 +9,7 @@ import com.facebook.presto.spi.ConnectorTableLayoutHandle;
 /**
  * @author chengzhi on 16/1/29.
  */
-public class OdpsConnectorHandleResolver implements ConnectorHandleResolver
+public class OdpsHandleResolver implements ConnectorHandleResolver
 {
 
     @Override

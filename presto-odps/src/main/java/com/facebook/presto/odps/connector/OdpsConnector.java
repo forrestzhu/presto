@@ -1,6 +1,6 @@
 package com.facebook.presto.odps.connector;
 
-import com.facebook.presto.odps.metadata.OdpsConnectorMetadata;
+import com.facebook.presto.odps.metadata.OdpsMetadata;
 import com.facebook.presto.spi.connector.Connector;
 import com.facebook.presto.spi.connector.ConnectorSplitManager;
 import com.facebook.presto.spi.connector.ConnectorTransactionHandle;
@@ -13,10 +13,10 @@ import com.google.inject.Inject;
 public class OdpsConnector implements Connector
 {
 
-    private final OdpsConnectorMetadata metadata;
+    private final OdpsMetadata metadata;
 
     @Inject
-    public OdpsConnector(OdpsConnectorMetadata metadata)
+    public OdpsConnector(OdpsMetadata metadata)
     {
         this.metadata = metadata;
     }
@@ -33,7 +33,7 @@ public class OdpsConnector implements Connector
      * @param transactionHandle
      */
     @Override
-    public OdpsConnectorMetadata getMetadata(ConnectorTransactionHandle transactionHandle)
+    public OdpsMetadata getMetadata(ConnectorTransactionHandle transactionHandle)
     {
         return metadata;
     }

@@ -21,7 +21,7 @@ import java.util.Set;
 /**
  * @author chengzhi on 16/1/29.
  */
-public class OdpsConnectorMetadata implements ConnectorMetadata
+public class OdpsMetadata implements ConnectorMetadata
 {
 
 
@@ -43,7 +43,7 @@ public class OdpsConnectorMetadata implements ConnectorMetadata
      * @param tableName
      */
     @Override
-    public OdpsConnectorTableHandle getTableHandle(ConnectorSession session, SchemaTableName tableName)
+    public OdpsTableHandle getTableHandle(ConnectorSession session, SchemaTableName tableName)
     {
         return null;
     }

@@ -19,7 +19,7 @@ public class OdpsConnectorFactory implements ConnectorFactory
     }
 
     @Override
-    public OdpsConnectorHandleResolver getHandleResolver()
+    public OdpsHandleResolver getHandleResolver()
     {
         return null;
     }
