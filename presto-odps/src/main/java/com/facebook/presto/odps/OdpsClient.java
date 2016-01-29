@@ -8,8 +8,9 @@ import java.util.Map;
 public class OdpsClient
 {
 
+
     public OdpsClient(Map<String, String> optionalConfig)
     {
-        
+
     }
 }
