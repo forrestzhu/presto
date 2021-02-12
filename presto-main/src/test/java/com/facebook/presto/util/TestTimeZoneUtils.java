@@ -13,22 +13,19 @@
  */
 package com.facebook.presto.util;
 
-import com.facebook.presto.spi.type.TimeZoneKey;
-import com.google.common.collect.Sets;
+import com.facebook.presto.common.type.TimeZoneKey;
 import org.joda.time.DateTime;
 import org.joda.time.DateTimeZone;
 import org.testng.annotations.Test;
 
-import java.util.Arrays;
-import java.util.TimeZone;
+import java.time.ZoneId;
 import java.util.TreeSet;
 
-import static com.facebook.presto.spi.type.DateTimeEncoding.packDateTimeWithZone;
-import static com.facebook.presto.spi.type.TimeZoneKey.isUtcZoneId;
+import static com.facebook.presto.common.type.DateTimeEncoding.packDateTimeWithZone;
+import static com.facebook.presto.common.type.TimeZoneKey.isUtcZoneId;
 import static com.facebook.presto.util.DateTimeZoneIndex.getDateTimeZone;
 import static com.facebook.presto.util.DateTimeZoneIndex.packDateTimeWithZone;
 import static com.facebook.presto.util.DateTimeZoneIndex.unpackDateTimeZone;
-import static java.util.Locale.ENGLISH;
 import static org.testng.Assert.assertEquals;
 
 public class TestTimeZoneUtils
@@ -38,13 +35,21 @@ public class TestTimeZoneUtils
     {
         TimeZoneKey.getTimeZoneKey("GMT-13:00");
 
-        TreeSet<String> jodaZones = new TreeSet<>(DateTimeZone.getAvailableIDs());
-        TreeSet<String> jdkZones = new TreeSet<>(Arrays.asList(TimeZone.getAvailableIDs()));
+        TreeSet<String> jdkZones = new TreeSet<>(ZoneId.getAvailableZoneIds());
 
-        for (String zoneId : new TreeSet<>(Sets.intersection(jodaZones, jdkZones))) {
-            if (zoneId.toLowerCase(ENGLISH).startsWith("etc/") || zoneId.toLowerCase(ENGLISH).startsWith("gmt")) {
+        for (String zoneId : new TreeSet<>(jdkZones)) {
+            if (zoneId.startsWith("Etc/") || zoneId.startsWith("GMT") || zoneId.startsWith("SystemV/")) {
                 continue;
             }
+
+            if (zoneId.equals("Canada/East-Saskatchewan")) {
+                // TODO: remove once minimum Java version is increased to 8u161 and 9.0.4, see PrestoSystemRequirement.
+                // Removed from tzdata since 2017c.
+                // Java updated to 2017c since 8u161, 9.0.4.
+                // All Java 10+ are on later versions
+                continue;
+            }
+
             DateTimeZone dateTimeZone = DateTimeZone.forID(zoneId);
             DateTimeZone indexedZone = getDateTimeZone(TimeZoneKey.getTimeZoneKey(zoneId));
 

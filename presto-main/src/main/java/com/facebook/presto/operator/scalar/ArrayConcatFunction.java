@@ -13,41 +13,63 @@
  */
 package com.facebook.presto.operator.scalar;
 
-import com.facebook.presto.metadata.FunctionRegistry;
+import com.facebook.presto.annotation.UsedByGeneratedCode;
+import com.facebook.presto.common.PageBuilder;
+import com.facebook.presto.common.QualifiedObjectName;
+import com.facebook.presto.common.block.Block;
+import com.facebook.presto.common.block.BlockBuilder;
+import com.facebook.presto.common.type.Type;
+import com.facebook.presto.metadata.BoundVariables;
+import com.facebook.presto.metadata.FunctionAndTypeManager;
 import com.facebook.presto.metadata.SqlScalarFunction;
-import com.facebook.presto.spi.block.Block;
-import com.facebook.presto.spi.type.Type;
-import com.facebook.presto.spi.type.TypeManager;
+import com.facebook.presto.spi.PrestoException;
+import com.facebook.presto.spi.function.FunctionKind;
+import com.facebook.presto.spi.function.Signature;
+import com.facebook.presto.spi.function.SqlFunctionVisibility;
+import com.facebook.presto.sql.gen.VarArgsToArrayAdapterGenerator;
 import com.google.common.collect.ImmutableList;
 
 import java.lang.invoke.MethodHandle;
-import java.lang.invoke.MethodType;
-import java.util.Map;
 import java.util.Optional;
 
-import static com.facebook.presto.metadata.Signature.typeParameter;
-import static com.facebook.presto.spi.StandardErrorCode.FUNCTION_IMPLEMENTATION_ERROR;
-import static com.facebook.presto.util.Reflection.constructorMethodHandle;
+import static com.facebook.presto.common.type.TypeSignature.parseTypeSignature;
+import static com.facebook.presto.metadata.BuiltInTypeAndFunctionNamespaceManager.DEFAULT_NAMESPACE;
+import static com.facebook.presto.operator.scalar.BuiltInScalarFunctionImplementation.ArgumentProperty.valueTypeArgumentProperty;
+import static com.facebook.presto.operator.scalar.BuiltInScalarFunctionImplementation.NullConvention.RETURN_NULL_ON_NULL;
+import static com.facebook.presto.spi.StandardErrorCode.INVALID_FUNCTION_ARGUMENT;
+import static com.facebook.presto.spi.function.Signature.typeVariable;
+import static com.facebook.presto.spi.function.SqlFunctionVisibility.PUBLIC;
+import static com.facebook.presto.sql.gen.VarArgsToArrayAdapterGenerator.generateVarArgsToArrayAdapter;
 import static com.facebook.presto.util.Reflection.methodHandle;
-import static java.lang.invoke.MethodHandles.permuteArguments;
+import static java.util.Collections.nCopies;
 
-public class ArrayConcatFunction
+public final class ArrayConcatFunction
         extends SqlScalarFunction
 {
     public static final ArrayConcatFunction ARRAY_CONCAT_FUNCTION = new ArrayConcatFunction();
-    private static final String FUNCTION_NAME = "concat";
-    private static final MethodHandle CONSTRUCTOR = constructorMethodHandle(FUNCTION_IMPLEMENTATION_ERROR, ArrayConcatUtils.class, Type.class);
-    private static final MethodHandle METHOD_HANDLE = methodHandle(ArrayConcatUtils.class, FUNCTION_NAME, Type.class, Block.class, Block.class);
 
-    public ArrayConcatFunction()
+    private static final String FUNCTION_NAME = "concat";
+    private static final String DESCRIPTION = "Concatenates given arrays";
+
+    private static final MethodHandle METHOD_HANDLE = methodHandle(ArrayConcatFunction.class, "concat", Type.class, Object.class, Block[].class);
+    private static final MethodHandle USER_STATE_FACTORY = methodHandle(ArrayConcatFunction.class, "createState", Type.class);
+
+    private ArrayConcatFunction()
     {
-        super(FUNCTION_NAME, ImmutableList.of(typeParameter("E")), "array<E>", ImmutableList.of("array<E>", "array<E>"));
+        super(new Signature(
+                QualifiedObjectName.valueOf(DEFAULT_NAMESPACE, FUNCTION_NAME),
+                FunctionKind.SCALAR,
+                ImmutableList.of(typeVariable("E")),
+                ImmutableList.of(),
+                parseTypeSignature("array(E)"),
+                ImmutableList.of(parseTypeSignature("array(E)")),
+                true));
     }
 
     @Override
-    public boolean isHidden()
+    public SqlFunctionVisibility getVisibility()
     {
-        return false;
+        return PUBLIC;
     }
 
     @Override
@@ -59,23 +81,71 @@ public class ArrayConcatFunction
     @Override
     public String getDescription()
     {
-        return "Concatenates given arrays";
+        return DESCRIPTION;
     }
 
     @Override
-    public ScalarFunctionImplementation specialize(Map<String, Type> types, int arity, TypeManager typeManager, FunctionRegistry functionRegistry)
+    public BuiltInScalarFunctionImplementation specialize(BoundVariables boundVariables, int arity, FunctionAndTypeManager functionAndTypeManager)
     {
-        Type elementType = types.get("E");
-        MethodType newType = METHOD_HANDLE.type().changeParameterType(0, Type.class).changeParameterType(1, ArrayConcatUtils.class);
-        int[] permutedIndices = new int[newType.parameterCount()];
-        permutedIndices[0] = 1;
-        permutedIndices[1] = 0;
-        for (int i = 2; i < permutedIndices.length; i++) {
-            permutedIndices[i] = i;
+        if (arity < 2) {
+            throw new PrestoException(INVALID_FUNCTION_ARGUMENT, "There must be two or more arguments to " + FUNCTION_NAME);
         }
-        MethodHandle methodHandle = permuteArguments(METHOD_HANDLE, newType, permutedIndices);
-        methodHandle = methodHandle.bindTo(elementType);
-        MethodHandle instanceFactory = CONSTRUCTOR.bindTo(elementType);
-        return new ScalarFunctionImplementation(false, ImmutableList.of(false, false), methodHandle, Optional.of(instanceFactory), isDeterministic());
+
+        Type elementType = boundVariables.getTypeVariable("E");
+
+        VarArgsToArrayAdapterGenerator.MethodHandleAndConstructor methodHandleAndConstructor = generateVarArgsToArrayAdapter(
+                Block.class,
+                Block.class,
+                arity,
+                METHOD_HANDLE.bindTo(elementType),
+                USER_STATE_FACTORY.bindTo(elementType));
+
+        return new BuiltInScalarFunctionImplementation(
+                false,
+                nCopies(arity, valueTypeArgumentProperty(RETURN_NULL_ON_NULL)),
+                methodHandleAndConstructor.getMethodHandle(),
+                Optional.of(methodHandleAndConstructor.getConstructor()));
+    }
+
+    @UsedByGeneratedCode
+    public static Object createState(Type elementType)
+    {
+        return new PageBuilder(ImmutableList.of(elementType));
+    }
+
+    @UsedByGeneratedCode
+    public static Block concat(Type elementType, Object state, Block[] blocks)
+    {
+        int resultPositionCount = 0;
+
+        // fast path when there is at most one non empty block
+        Block nonEmptyBlock = null;
+        for (int i = 0; i < blocks.length; i++) {
+            resultPositionCount += blocks[i].getPositionCount();
+            if (blocks[i].getPositionCount() > 0) {
+                nonEmptyBlock = blocks[i];
+            }
+        }
+        if (nonEmptyBlock == null) {
+            return blocks[0];
+        }
+        if (resultPositionCount == nonEmptyBlock.getPositionCount()) {
+            return nonEmptyBlock;
+        }
+
+        PageBuilder pageBuilder = (PageBuilder) state;
+        if (pageBuilder.isFull()) {
+            pageBuilder.reset();
+        }
+
+        BlockBuilder blockBuilder = pageBuilder.getBlockBuilder(0);
+        for (int blockIndex = 0; blockIndex < blocks.length; blockIndex++) {
+            Block block = blocks[blockIndex];
+            for (int i = 0; i < block.getPositionCount(); i++) {
+                elementType.appendTo(block, i, blockBuilder);
+            }
+        }
+        pageBuilder.declarePositions(resultPositionCount);
+        return blockBuilder.getRegion(blockBuilder.getPositionCount() - resultPositionCount, resultPositionCount);
     }
 }

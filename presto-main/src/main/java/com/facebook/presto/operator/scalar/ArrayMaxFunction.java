@@ -13,15 +13,103 @@
  */
 package com.facebook.presto.operator.scalar;
 
-import com.facebook.presto.metadata.OperatorType;
+import com.facebook.presto.common.block.Block;
+import com.facebook.presto.common.type.Type;
+import com.facebook.presto.spi.function.Description;
+import com.facebook.presto.spi.function.OperatorDependency;
+import com.facebook.presto.spi.function.ScalarFunction;
+import com.facebook.presto.spi.function.SqlNullable;
+import com.facebook.presto.spi.function.SqlType;
+import com.facebook.presto.spi.function.TypeParameter;
+import io.airlift.slice.Slice;
 
-public class ArrayMaxFunction
-        extends AbstractArrayMinMaxFunction
+import java.lang.invoke.MethodHandle;
+
+import static com.facebook.presto.common.function.OperatorType.GREATER_THAN;
+import static com.facebook.presto.operator.scalar.ArrayMinMaxUtils.booleanArrayMinMax;
+import static com.facebook.presto.operator.scalar.ArrayMinMaxUtils.doubleArrayMinMax;
+import static com.facebook.presto.operator.scalar.ArrayMinMaxUtils.longArrayMinMax;
+import static com.facebook.presto.operator.scalar.ArrayMinMaxUtils.sliceArrayMinMax;
+import static com.facebook.presto.util.Failures.internalError;
+
+@ScalarFunction("array_max")
+@Description("Get maximum value of array")
+public final class ArrayMaxFunction
 {
-    public static final ArrayMaxFunction ARRAY_MAX = new ArrayMaxFunction();
+    private ArrayMaxFunction() {}
 
-    private ArrayMaxFunction()
+    @TypeParameter("T")
+    @SqlType("T")
+    @SqlNullable
+    public static Long longArrayMax(
+            @OperatorDependency(operator = GREATER_THAN, argumentTypes = {"T", "T"}) MethodHandle compareMethodHandle,
+            @TypeParameter("T") Type elementType,
+            @SqlType("array(T)") Block block)
     {
-        super(OperatorType.GREATER_THAN, "array_max", "Get maximum value of array");
+        return longArrayMinMax(compareMethodHandle, elementType, block);
+    }
+
+    @TypeParameter("T")
+    @SqlType("T")
+    @SqlNullable
+    public static Boolean booleanArrayMax(
+            @OperatorDependency(operator = GREATER_THAN, argumentTypes = {"T", "T"}) MethodHandle compareMethodHandle,
+            @TypeParameter("T") Type elementType,
+            @SqlType("array(T)") Block block)
+    {
+        return booleanArrayMinMax(compareMethodHandle, elementType, block);
+    }
+
+    @TypeParameter("T")
+    @SqlType("T")
+    @SqlNullable
+    public static Double doubleArrayMax(
+            @OperatorDependency(operator = GREATER_THAN, argumentTypes = {"T", "T"}) MethodHandle compareMethodHandle,
+            @TypeParameter("T") Type elementType,
+            @SqlType("array(T)") Block block)
+    {
+        return doubleArrayMinMax(compareMethodHandle, elementType, block);
+    }
+
+    @TypeParameter("T")
+    @SqlType("T")
+    @SqlNullable
+    public static Slice sliceArrayMax(
+            @OperatorDependency(operator = GREATER_THAN, argumentTypes = {"T", "T"}) MethodHandle compareMethodHandle,
+            @TypeParameter("T") Type elementType,
+            @SqlType("array(T)") Block block)
+    {
+        return sliceArrayMinMax(compareMethodHandle, elementType, block);
+    }
+
+    @TypeParameter("T")
+    @SqlType("T")
+    @SqlNullable
+    public static Block blockArrayMax(
+            @OperatorDependency(operator = GREATER_THAN, argumentTypes = {"T", "T"}) MethodHandle compareMethodHandle,
+            @TypeParameter("T") Type elementType,
+            @SqlType("array(T)") Block block)
+    {
+        try {
+            if (block.getPositionCount() == 0) {
+                return null;
+            }
+
+            Block selectedValue = (Block) elementType.getObject(block, 0);
+            for (int i = 0; i < block.getPositionCount(); i++) {
+                if (block.isNull(i)) {
+                    return null;
+                }
+                Block value = (Block) elementType.getObject(block, i);
+                if ((boolean) compareMethodHandle.invokeExact(value, selectedValue)) {
+                    selectedValue = value;
+                }
+            }
+
+            return selectedValue;
+        }
+        catch (Throwable t) {
+            throw internalError(t);
+        }
     }
 }

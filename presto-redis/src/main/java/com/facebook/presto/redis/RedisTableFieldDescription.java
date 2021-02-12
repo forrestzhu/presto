@@ -13,8 +13,8 @@
  */
 package com.facebook.presto.redis;
 
+import com.facebook.presto.common.type.Type;
 import com.facebook.presto.spi.ColumnMetadata;
-import com.facebook.presto.spi.type.Type;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
@@ -117,7 +117,7 @@ public final class RedisTableFieldDescription
 
     ColumnMetadata getColumnMetadata()
     {
-        return new ColumnMetadata(getName(), getType(), false, getComment(), isHidden());
+        return new ColumnMetadata(getName(), getType(), getComment(), isHidden());
     }
 
     @Override

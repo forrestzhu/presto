@@ -13,11 +13,10 @@
  */
 package com.facebook.presto.execution;
 
-import com.facebook.presto.spi.Node;
+import com.facebook.airlift.log.Logger;
+import com.facebook.presto.metadata.InternalNode;
 import com.facebook.presto.util.FinalizerService;
-import com.google.common.base.MoreObjects;
 import com.google.common.collect.Sets;
-import io.airlift.log.Logger;
 
 import javax.annotation.concurrent.ThreadSafe;
 import javax.inject.Inject;
@@ -27,13 +26,14 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.IntConsumer;
 
+import static com.google.common.base.MoreObjects.toStringHelper;
 import static java.util.Objects.requireNonNull;
 
 @ThreadSafe
 public class NodeTaskMap
 {
     private static final Logger log = Logger.get(NodeTaskMap.class);
-    private final ConcurrentHashMap<Node, NodeTasks> nodeTasksMap = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<InternalNode, NodeTasks> nodeTasksMap = new ConcurrentHashMap<>();
     private final FinalizerService finalizerService;
 
     @Inject
@@ -42,22 +42,22 @@ public class NodeTaskMap
         this.finalizerService = requireNonNull(finalizerService, "finalizerService is null");
     }
 
-    public void addTask(Node node, RemoteTask task)
+    public void addTask(InternalNode node, RemoteTask task)
     {
         createOrGetNodeTasks(node).addTask(task);
     }
 
-    public int getPartitionedSplitsOnNode(Node node)
+    public int getPartitionedSplitsOnNode(InternalNode node)
     {
         return createOrGetNodeTasks(node).getPartitionedSplitCount();
     }
 
-    public PartitionedSplitCountTracker createPartitionedSplitCountTracker(Node node, TaskId taskId)
+    public PartitionedSplitCountTracker createPartitionedSplitCountTracker(InternalNode node, TaskId taskId)
     {
         return createOrGetNodeTasks(node).createPartitionedSplitCountTracker(taskId);
     }
 
-    private NodeTasks createOrGetNodeTasks(Node node)
+    private NodeTasks createOrGetNodeTasks(InternalNode node)
     {
         NodeTasks nodeTasks = nodeTasksMap.get(node);
         if (nodeTasks == null) {
@@ -66,7 +66,7 @@ public class NodeTaskMap
         return nodeTasks;
     }
 
-    private NodeTasks addNodeTask(Node node)
+    private NodeTasks addNodeTask(InternalNode node)
     {
         NodeTasks newNodeTasks = new NodeTasks(finalizerService);
         NodeTasks nodeTasks = nodeTasksMap.putIfAbsent(node, newNodeTasks);
@@ -95,14 +95,14 @@ public class NodeTaskMap
         private void addTask(RemoteTask task)
         {
             if (remoteTasks.add(task)) {
-                task.addStateChangeListener(taskInfo -> {
-                    if (taskInfo.getState().isDone()) {
+                task.addStateChangeListener(taskStatus -> {
+                    if (taskStatus.getState().isDone()) {
                         remoteTasks.remove(task);
                     }
                 });
 
                 // Check if task state is already done before adding the listener
-                if (task.getTaskInfo().getState().isDone()) {
+                if (task.getTaskStatus().getState().isDone()) {
                     remoteTasks.remove(task);
                 }
             }
@@ -163,7 +163,7 @@ public class NodeTaskMap
             @Override
             public String toString()
             {
-                return MoreObjects.toStringHelper(this)
+                return toStringHelper(this)
                         .add("taskId", taskId)
                         .add("splits", localPartitionedSplitCount)
                         .toString();

@@ -13,14 +13,11 @@
  */
 package com.facebook.presto.operator;
 
-import com.facebook.presto.spi.Page;
+import com.facebook.presto.common.Page;
 
 public interface PartitionFunction
 {
     int getPartitionCount();
 
-    /**
-     * @param functionArguments the arguments to partition function in order (no extra columns)
-     */
-    int getPartition(Page functionArguments, int position);
+    int getPartition(Page page, int position);
 }

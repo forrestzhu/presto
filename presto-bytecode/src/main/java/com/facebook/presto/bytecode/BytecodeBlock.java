@@ -601,7 +601,7 @@ public class BytecodeBlock
         if (type == long.class || type == double.class) {
             nodes.add(OpCode.DUP2);
         }
-        else {
+        else if (type != void.class) {
             nodes.add(OpCode.DUP);
         }
         return this;
@@ -918,6 +918,18 @@ public class BytecodeBlock
     public BytecodeBlock putObjectArrayElement()
     {
         nodes.add(OpCode.AASTORE);
+        return this;
+    }
+
+    public BytecodeBlock getIntArrayElement()
+    {
+        nodes.add(OpCode.IALOAD);
+        return this;
+    }
+
+    public BytecodeBlock putIntArrayElement()
+    {
+        nodes.add(OpCode.IASTORE);
         return this;
     }
 

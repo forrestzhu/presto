@@ -13,11 +13,12 @@
  */
 package com.facebook.presto.raptor.metadata;
 
+import com.facebook.airlift.log.Logger;
+import com.facebook.presto.common.predicate.TupleDomain;
 import com.facebook.presto.raptor.RaptorColumnHandle;
 import com.facebook.presto.spi.PrestoException;
-import com.facebook.presto.spi.predicate.TupleDomain;
 import com.google.common.collect.AbstractIterator;
-import io.airlift.log.Logger;
+import com.google.common.collect.ImmutableSet;
 import org.skife.jdbi.v2.IDBI;
 import org.skife.jdbi.v2.ResultIterator;
 
@@ -29,6 +30,8 @@ import java.sql.Statement;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
@@ -36,6 +39,7 @@ import java.util.function.Function;
 import static com.facebook.presto.raptor.RaptorErrorCode.RAPTOR_ERROR;
 import static com.facebook.presto.raptor.metadata.DatabaseShardManager.shardIndexTable;
 import static com.facebook.presto.raptor.util.ArrayUtil.intArrayFromBytes;
+import static com.facebook.presto.raptor.util.DatabaseUtil.enableStreamingResults;
 import static com.facebook.presto.raptor.util.DatabaseUtil.metadataError;
 import static com.facebook.presto.raptor.util.DatabaseUtil.onDemandDao;
 import static com.facebook.presto.raptor.util.UuidUtil.uuidFromBytes;
@@ -43,27 +47,43 @@ import static java.lang.String.format;
 import static java.util.stream.Collectors.toSet;
 
 final class ShardIterator
-        extends AbstractIterator<ShardNodes>
-        implements ResultIterator<ShardNodes>
+        extends AbstractIterator<BucketShards>
+        implements ResultIterator<BucketShards>
 {
     private static final Logger log = Logger.get(ShardIterator.class);
     private final Map<Integer, String> nodeMap = new HashMap<>();
 
-    private final ShardManagerDao dao;
+    private final boolean merged;
+    private final boolean tableSupportsDeltaDelete;
+    private final List<String> bucketToNode;
+    private final ShardDao dao;
     private final Connection connection;
     private final PreparedStatement statement;
     private final ResultSet resultSet;
+    private boolean first = true;
 
-    public ShardIterator(long tableId, TupleDomain<RaptorColumnHandle> effectivePredicate, IDBI dbi)
+    public ShardIterator(
+            long tableId,
+            boolean merged,
+            boolean tableSupportsDeltaDelete,
+            Optional<List<String>> bucketToNode,
+            TupleDomain<RaptorColumnHandle> effectivePredicate,
+            IDBI dbi)
     {
+        this.merged = merged;
+        this.tableSupportsDeltaDelete = tableSupportsDeltaDelete;
+        this.bucketToNode = bucketToNode.orElse(null);
         ShardPredicate predicate = ShardPredicate.create(effectivePredicate);
 
-        String sql = format(
-                "SELECT shard_uuid, node_ids FROM %s WHERE %s",
-                shardIndexTable(tableId),
-                predicate.getPredicate());
+        String sql;
+        sql = "SELECT shard_uuid, " +
+                (tableSupportsDeltaDelete ? "delta_shard_uuid, " : "") +
+                (bucketToNode.isPresent() ? "bucket_number " : "node_ids ") +
+                "FROM %s WHERE %s " +
+                (bucketToNode.isPresent() ? "ORDER BY bucket_number" : "");
+        sql = format(sql, shardIndexTable(tableId), predicate.getPredicate());
 
-        dao = onDemandDao(dbi, ShardManagerDao.class);
+        dao = onDemandDao(dbi, ShardDao.class);
         fetchNodes();
 
         try {
@@ -78,13 +98,17 @@ final class ShardIterator
             close();
             throw metadataError(e);
         }
+        catch (Throwable t) {
+            close();
+            throw t;
+        }
     }
 
     @Override
-    protected ShardNodes computeNext()
+    protected BucketShards computeNext()
     {
         try {
-            return compute();
+            return merged ? computeMerged() : compute();
         }
         catch (SQLException e) {
             throw metadataError(e);
@@ -105,7 +129,10 @@ final class ShardIterator
         }
     }
 
-    private ShardNodes compute()
+    /**
+     * Compute split-per-shard (separate split for each shard).
+     */
+    private BucketShards compute()
             throws SQLException
     {
         if (!resultSet.next()) {
@@ -113,14 +140,71 @@ final class ShardIterator
         }
 
         UUID shardUuid = uuidFromBytes(resultSet.getBytes("shard_uuid"));
-        List<Integer> nodeIds = intArrayFromBytes(resultSet.getBytes("node_ids"));
+        Optional<UUID> deltaShardUuid = getDeltaShardUuidFromResultSet();
+        Set<String> nodeIdentifiers;
+        OptionalInt bucketNumber = OptionalInt.empty();
 
+        if (bucketToNode != null) {
+            int bucket = resultSet.getInt("bucket_number");
+            bucketNumber = OptionalInt.of(bucket);
+            nodeIdentifiers = ImmutableSet.of(getBucketNode(bucket));
+        }
+        else {
+            List<Integer> nodeIds = intArrayFromBytes(resultSet.getBytes("node_ids"));
+            nodeIdentifiers = getNodeIdentifiers(nodeIds, shardUuid);
+        }
+
+        ShardNodes shard = new ShardNodes(shardUuid, deltaShardUuid, nodeIdentifiers);
+        return new BucketShards(bucketNumber, ImmutableSet.of(shard));
+    }
+
+    /**
+     * Compute split-per-bucket (single split for all shards in a bucket).
+     */
+    private BucketShards computeMerged()
+            throws SQLException
+    {
+        if (resultSet.isAfterLast()) {
+            return endOfData();
+        }
+        if (first) {
+            first = false;
+            if (!resultSet.next()) {
+                return endOfData();
+            }
+        }
+
+        int bucketNumber = resultSet.getInt("bucket_number");
+        ImmutableSet.Builder<ShardNodes> shards = ImmutableSet.builder();
+
+        do {
+            UUID shardUuid = uuidFromBytes(resultSet.getBytes("shard_uuid"));
+            Optional<UUID> deltaShardUuid = getDeltaShardUuidFromResultSet();
+            int bucket = resultSet.getInt("bucket_number");
+            Set<String> nodeIdentifiers = ImmutableSet.of(getBucketNode(bucket));
+
+            shards.add(new ShardNodes(shardUuid, deltaShardUuid, nodeIdentifiers));
+        }
+        while (resultSet.next() && resultSet.getInt("bucket_number") == bucketNumber);
+
+        return new BucketShards(OptionalInt.of(bucketNumber), shards.build());
+    }
+
+    private String getBucketNode(int bucket)
+    {
+        String node = bucketToNode.get(bucket);
+        if (node == null) {
+            throw new PrestoException(RAPTOR_ERROR, "No node mapping for bucket: " + bucket);
+        }
+        return node;
+    }
+
+    private Set<String> getNodeIdentifiers(List<Integer> nodeIds, UUID shardUuid)
+    {
         Function<Integer, String> fetchNode = id -> fetchNode(id, shardUuid);
-        Set<String> nodeIdentifiers = nodeIds.stream()
+        return nodeIds.stream()
                 .map(id -> nodeMap.computeIfAbsent(id, fetchNode))
                 .collect(toSet());
-
-        return new ShardNodes(shardUuid, nodeIdentifiers);
     }
 
     private String fetchNode(int id, UUID shardUuid)
@@ -139,11 +223,12 @@ final class ShardIterator
         }
     }
 
-    private static void enableStreamingResults(Statement statement)
+    private Optional<UUID> getDeltaShardUuidFromResultSet()
             throws SQLException
     {
-        if (statement.isWrapperFor(com.mysql.jdbc.Statement.class)) {
-            statement.unwrap(com.mysql.jdbc.Statement.class).enableStreamingResults();
+        if (tableSupportsDeltaDelete && resultSet.getBytes("delta_shard_uuid") != null) {
+            return Optional.of(uuidFromBytes(resultSet.getBytes("delta_shard_uuid")));
         }
+        return Optional.empty();
     }
 }

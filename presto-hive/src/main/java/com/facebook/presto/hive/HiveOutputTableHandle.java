@@ -13,13 +13,17 @@
  */
 package com.facebook.presto.hive;
 
+import com.facebook.presto.hive.metastore.HivePageSinkMetadata;
+import com.facebook.presto.hive.metastore.SortingColumn;
 import com.facebook.presto.spi.ConnectorOutputTableHandle;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
 
 import java.util.List;
-import java.util.OptionalInt;
+import java.util.Map;
+import java.util.Optional;
 
 import static java.util.Objects.requireNonNull;
 
@@ -29,33 +33,45 @@ public class HiveOutputTableHandle
 {
     private final List<String> partitionedBy;
     private final String tableOwner;
-    private final OptionalInt retentionDays;
+    private final Map<String, String> additionalTableParameters;
 
     @JsonCreator
     public HiveOutputTableHandle(
-            @JsonProperty("clientId") String clientId,
             @JsonProperty("schemaName") String schemaName,
             @JsonProperty("tableName") String tableName,
             @JsonProperty("inputColumns") List<HiveColumnHandle> inputColumns,
             @JsonProperty("filePrefix") String filePrefix,
+            @JsonProperty("pageSinkMetadata") HivePageSinkMetadata pageSinkMetadata,
             @JsonProperty("locationHandle") LocationHandle locationHandle,
-            @JsonProperty("hiveStorageFormat") HiveStorageFormat hiveStorageFormat,
+            @JsonProperty("tableStorageFormat") HiveStorageFormat tableStorageFormat,
+            @JsonProperty("partitionStorageFormat") HiveStorageFormat partitionStorageFormat,
+            @JsonProperty("actualStorageFormat") HiveStorageFormat actualStorageFormat,
+            @JsonProperty("compressionCodec") HiveCompressionCodec compressionCodec,
             @JsonProperty("partitionedBy") List<String> partitionedBy,
+            @JsonProperty("bucketProperty") Optional<HiveBucketProperty> bucketProperty,
+            @JsonProperty("preferredOrderingColumns") List<SortingColumn> preferredOrderingColumns,
             @JsonProperty("tableOwner") String tableOwner,
-            @JsonProperty("retentionDays") OptionalInt retentionDays)
+            @JsonProperty("additionalTableParameters") Map<String, String> additionalTableParameters,
+            @JsonProperty("encryptionInformation") Optional<EncryptionInformation> encryptionInformation)
     {
         super(
-                clientId,
                 schemaName,
                 tableName,
                 inputColumns,
                 filePrefix,
-                requireNonNull(locationHandle, "locationHandle is null"),
-                hiveStorageFormat);
+                pageSinkMetadata,
+                locationHandle,
+                bucketProperty,
+                preferredOrderingColumns,
+                tableStorageFormat,
+                partitionStorageFormat,
+                actualStorageFormat,
+                compressionCodec,
+                encryptionInformation);
 
         this.partitionedBy = ImmutableList.copyOf(requireNonNull(partitionedBy, "partitionedBy is null"));
         this.tableOwner = requireNonNull(tableOwner, "tableOwner is null");
-        this.retentionDays = requireNonNull(retentionDays, "retentionDays is null");
+        this.additionalTableParameters = ImmutableMap.copyOf(requireNonNull(additionalTableParameters, "additionalTableParameters is null"));
     }
 
     @JsonProperty
@@ -71,8 +87,8 @@ public class HiveOutputTableHandle
     }
 
     @JsonProperty
-    public OptionalInt getRetentionDays()
+    public Map<String, String> getAdditionalTableParameters()
     {
-        return retentionDays;
+        return additionalTableParameters;
     }
 }

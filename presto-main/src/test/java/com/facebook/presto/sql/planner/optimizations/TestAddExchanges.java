@@ -13,15 +13,15 @@
  */
 package com.facebook.presto.sql.planner.optimizations;
 
+import com.facebook.presto.common.block.SortOrder;
 import com.facebook.presto.spi.ConstantProperty;
 import com.facebook.presto.spi.GroupingProperty;
 import com.facebook.presto.spi.SortingProperty;
-import com.facebook.presto.spi.block.SortOrder;
-import com.facebook.presto.sql.planner.Symbol;
+import com.facebook.presto.spi.relation.VariableReferenceExpression;
+import com.facebook.presto.sql.planner.optimizations.ActualProperties.Global;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Lists;
-import org.testng.Assert;
 import org.testng.annotations.Test;
 
 import java.util.ArrayList;
@@ -29,724 +29,720 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Optional;
 
-import static com.facebook.presto.spi.block.SortOrder.ASC_NULLS_FIRST;
-import static com.facebook.presto.sql.planner.optimizations.ActualProperties.Global.distributed;
-import static com.facebook.presto.sql.planner.optimizations.ActualProperties.Global.undistributed;
-import static com.facebook.presto.sql.planner.optimizations.ActualProperties.Partitioning.hashPartitioned;
-import static com.facebook.presto.sql.planner.optimizations.ActualProperties.Partitioning.partitioned;
-import static com.facebook.presto.sql.planner.optimizations.ActualProperties.Partitioning.singlePartition;
+import static com.facebook.presto.common.block.SortOrder.ASC_NULLS_FIRST;
+import static com.facebook.presto.common.type.BigintType.BIGINT;
+import static com.facebook.presto.sql.planner.SystemPartitioningHandle.FIXED_HASH_DISTRIBUTION;
+import static com.facebook.presto.sql.planner.optimizations.ActualProperties.Global.arbitraryPartition;
+import static com.facebook.presto.sql.planner.optimizations.ActualProperties.Global.partitionedOn;
+import static com.facebook.presto.sql.planner.optimizations.ActualProperties.Global.singleStreamPartition;
 import static com.facebook.presto.sql.planner.optimizations.ActualProperties.builder;
 import static com.facebook.presto.sql.planner.optimizations.AddExchanges.streamingExecutionPreference;
+import static com.google.common.collect.ImmutableList.toImmutableList;
+import static org.testng.Assert.assertEquals;
 
+/**
+ * These are unit test for the internal logic in AddExchanges.
+ * For plan tests see {@link TestAddExchangesPlans}
+ */
 public class TestAddExchanges
 {
     @Test
     public void testPickLayoutAnyPreference()
-            throws Exception
     {
         Comparator<ActualProperties> preference = streamingExecutionPreference(PreferredProperties.any());
 
         List<ActualProperties> input = ImmutableList.<ActualProperties>builder()
                 .add(builder()
-                        .global(distributed(partitioned(ImmutableSet.of(symbol("a")))))
+                        .global(streamPartitionedOn("a", "b"))
                         .build())
                 .add(builder()
-                        .global(undistributed())
+                        .global(singleStreamPartition())
                         .build())
                 .add(builder()
-                        .global(distributed())
+                        .global(arbitraryPartition())
                         .local(ImmutableList.of(grouped("a", "b")))
                         .build())
                 .add(builder()
-                        .global(distributed())
+                        .global(arbitraryPartition())
                         .build())
                 .add(builder()
-                        .global(distributed(hashPartitioned(ImmutableList.of(symbol("a")))))
+                        .global(hashDistributedOn("a"))
                         .build())
                 .add(builder()
-                        .global(distributed(singlePartition()))
+                        .global(singleStream())
                         .local(ImmutableList.of(constant("a"), sorted("b", ASC_NULLS_FIRST)))
                         .build())
                 .add(builder()
-                        .global(undistributed())
+                        .global(singleStreamPartition())
                         .local(ImmutableList.of(sorted("a", ASC_NULLS_FIRST)))
                         .build())
                 .build();
         // Given no preferences, the original input order should be maintained
-        Assert.assertEquals(stableSort(input, preference), input);
+        assertEquals(stableSort(input, preference), input);
     }
 
     @Test
     public void testPickLayoutPartitionedPreference()
-            throws Exception
     {
         Comparator<ActualProperties> preference = streamingExecutionPreference(PreferredProperties.distributed());
 
         List<ActualProperties> input = ImmutableList.<ActualProperties>builder()
                 .add(builder()
-                        .global(distributed(partitioned(ImmutableSet.of(symbol("a")))))
+                        .global(streamPartitionedOn("a"))
                         .build())
                 .add(builder()
-                        .global(undistributed())
+                        .global(singleStreamPartition())
                         .build())
                 .add(builder()
-                        .global(distributed())
+                        .global(arbitraryPartition())
                         .local(ImmutableList.of(grouped("a", "b")))
                         .build())
                 .add(builder()
-                        .global(distributed())
+                        .global(arbitraryPartition())
                         .build())
                 .add(builder()
-                        .global(distributed(hashPartitioned(ImmutableList.of(symbol("a")))))
+                        .global(hashDistributedOn("a"))
                         .build())
                 .add(builder()
-                        .global(distributed(singlePartition()))
+                        .global(singleStream())
                         .local(ImmutableList.of(constant("a"), sorted("b", ASC_NULLS_FIRST)))
                         .build())
                 .add(builder()
-                        .global(undistributed())
+                        .global(singleStreamPartition())
                         .local(ImmutableList.of(sorted("a", ASC_NULLS_FIRST)))
                         .build())
                 .build();
 
         List<ActualProperties> expected = ImmutableList.<ActualProperties>builder()
                 .add(builder()
-                        .global(distributed(partitioned(ImmutableSet.of(symbol("a")))))
+                        .global(streamPartitionedOn("a"))
                         .build())
                 .add(builder()
-                        .global(distributed())
+                        .global(arbitraryPartition())
                         .local(ImmutableList.of(grouped("a", "b")))
                         .build())
                 .add(builder()
-                        .global(distributed())
+                        .global(arbitraryPartition())
                         .build())
                 .add(builder()
-                        .global(distributed(hashPartitioned(ImmutableList.of(symbol("a")))))
+                        .global(hashDistributedOn("a"))
                         .build())
                 .add(builder()
-                        .global(distributed(singlePartition()))
+                        .global(singleStream())
                         .local(ImmutableList.of(constant("a"), sorted("b", ASC_NULLS_FIRST)))
                         .build())
                 .add(builder()
-                        .global(undistributed())
+                        .global(singleStreamPartition())
                         .build())
                 .add(builder()
-                        .global(undistributed())
+                        .global(singleStreamPartition())
                         .local(ImmutableList.of(sorted("a", ASC_NULLS_FIRST)))
                         .build())
                 .build();
-        Assert.assertEquals(stableSort(input, preference), expected);
+        assertEquals(stableSort(input, preference), expected);
     }
 
     @Test
     public void testPickLayoutUnpartitionedPreference()
-            throws Exception
     {
         Comparator<ActualProperties> preference = streamingExecutionPreference(PreferredProperties.undistributed());
 
         List<ActualProperties> input = ImmutableList.<ActualProperties>builder()
                 .add(builder()
-                        .global(distributed(partitioned(ImmutableSet.of(symbol("a")))))
+                        .global(streamPartitionedOn("a"))
                         .build())
                 .add(builder()
-                        .global(undistributed())
+                        .global(singleStreamPartition())
                         .build())
                 .add(builder()
-                        .global(distributed())
+                        .global(arbitraryPartition())
                         .local(ImmutableList.of(grouped("a", "b")))
                         .build())
                 .add(builder()
-                        .global(distributed())
+                        .global(arbitraryPartition())
                         .build())
                 .add(builder()
-                        .global(distributed(hashPartitioned(ImmutableList.of(symbol("a")))))
+                        .global(hashDistributedOn("a"))
                         .build())
                 .add(builder()
-                        .global(distributed(singlePartition()))
+                        .global(singleStream())
                         .local(ImmutableList.of(constant("a"), sorted("b", ASC_NULLS_FIRST)))
                         .build())
                 .add(builder()
-                        .global(undistributed())
+                        .global(singleStreamPartition())
                         .local(ImmutableList.of(sorted("a", ASC_NULLS_FIRST)))
                         .build())
                 .build();
 
         List<ActualProperties> expected = ImmutableList.<ActualProperties>builder()
                 .add(builder()
-                        .global(undistributed())
+                        .global(singleStreamPartition())
                         .build())
                 .add(builder()
-                        .global(undistributed())
+                        .global(singleStreamPartition())
                         .local(ImmutableList.of(sorted("a", ASC_NULLS_FIRST)))
                         .build())
                 .add(builder()
-                        .global(distributed(partitioned(ImmutableSet.of(symbol("a")))))
+                        .global(streamPartitionedOn("a"))
                         .build())
                 .add(builder()
-                        .global(distributed())
+                        .global(arbitraryPartition())
                         .local(ImmutableList.of(grouped("a", "b")))
                         .build())
                 .add(builder()
-                        .global(distributed())
+                        .global(arbitraryPartition())
                         .build())
                 .add(builder()
-                        .global(distributed(hashPartitioned(ImmutableList.of(symbol("a")))))
+                        .global(hashDistributedOn("a"))
                         .build())
                 .add(builder()
-                        .global(distributed(singlePartition()))
+                        .global(singleStream())
                         .local(ImmutableList.of(constant("a"), sorted("b", ASC_NULLS_FIRST)))
                         .build())
                 .build();
-        Assert.assertEquals(stableSort(input, preference), expected);
+        assertEquals(stableSort(input, preference), expected);
     }
 
     @Test
     public void testPickLayoutPartitionedOnSingle()
-            throws Exception
     {
         Comparator<ActualProperties> preference = streamingExecutionPreference(
-                PreferredProperties.partitioned(ImmutableSet.of(symbol("a"))));
+                PreferredProperties.partitioned(ImmutableSet.of(variable("a"))));
 
         List<ActualProperties> input = ImmutableList.<ActualProperties>builder()
                 .add(builder()
-                        .global(distributed(partitioned(ImmutableSet.of(symbol("a")))))
+                        .global(streamPartitionedOn("a"))
                         .build())
                 .add(builder()
-                        .global(undistributed())
+                        .global(singleStreamPartition())
                         .build())
                 .add(builder()
-                        .global(distributed())
+                        .global(arbitraryPartition())
                         .local(ImmutableList.of(grouped("a", "b")))
                         .build())
                 .add(builder()
-                        .global(distributed())
+                        .global(arbitraryPartition())
                         .build())
                 .add(builder()
-                        .global(distributed(hashPartitioned(ImmutableList.of(symbol("a")))))
+                        .global(hashDistributedOn("a"))
                         .build())
                 .add(builder()
-                        .global(distributed(singlePartition()))
+                        .global(singleStream())
                         .local(ImmutableList.of(constant("a"), sorted("b", ASC_NULLS_FIRST)))
                         .build())
                 .add(builder()
-                        .global(undistributed())
+                        .global(singleStreamPartition())
                         .local(ImmutableList.of(sorted("a", ASC_NULLS_FIRST)))
                         .build())
                 .build();
 
         List<ActualProperties> expected = ImmutableList.<ActualProperties>builder()
                 .add(builder()
-                        .global(distributed(partitioned(ImmutableSet.of(symbol("a")))))
+                        .global(streamPartitionedOn("a"))
                         .build())
                 .add(builder()
-                        .global(undistributed())
+                        .global(singleStreamPartition())
                         .build())
                 .add(builder()
-                        .global(distributed(hashPartitioned(ImmutableList.of(symbol("a")))))
+                        .global(hashDistributedOn("a"))
                         .build())
                 .add(builder()
-                        .global(distributed(singlePartition()))
+                        .global(singleStream())
                         .local(ImmutableList.of(constant("a"), sorted("b", ASC_NULLS_FIRST)))
                         .build())
                 .add(builder()
-                        .global(undistributed())
+                        .global(singleStreamPartition())
                         .local(ImmutableList.of(sorted("a", ASC_NULLS_FIRST)))
                         .build())
                 .add(builder()
-                        .global(distributed())
+                        .global(arbitraryPartition())
                         .local(ImmutableList.of(grouped("a", "b")))
                         .build())
                 .add(builder()
-                        .global(distributed())
+                        .global(arbitraryPartition())
                         .build())
                 .build();
-        Assert.assertEquals(stableSort(input, preference), expected);
+        assertEquals(stableSort(input, preference), expected);
     }
 
     @Test
     public void testPickLayoutPartitionedOnMultiple()
-            throws Exception
     {
         Comparator<ActualProperties> preference = streamingExecutionPreference(
-                PreferredProperties.partitioned(ImmutableSet.of(symbol("a"), symbol("b"))));
+                PreferredProperties.partitioned(ImmutableSet.of(variable("a"), variable("b"))));
 
         List<ActualProperties> input = ImmutableList.<ActualProperties>builder()
                 .add(builder()
-                        .global(distributed(partitioned(ImmutableSet.of(symbol("a")))))
+                        .global(streamPartitionedOn("a"))
                         .build())
                 .add(builder()
-                        .global(undistributed())
+                        .global(singleStreamPartition())
                         .build())
                 .add(builder()
-                        .global(distributed())
+                        .global(arbitraryPartition())
                         .local(ImmutableList.of(grouped("a", "b")))
                         .build())
                 .add(builder()
-                        .global(distributed())
+                        .global(arbitraryPartition())
                         .build())
                 .add(builder()
-                        .global(distributed(hashPartitioned(ImmutableList.of(symbol("a")))))
+                        .global(hashDistributedOn("a"))
                         .build())
                 .add(builder()
-                        .global(distributed(singlePartition()))
+                        .global(singleStream())
                         .local(ImmutableList.of(constant("a"), sorted("b", ASC_NULLS_FIRST)))
                         .build())
                 .add(builder()
-                        .global(undistributed())
+                        .global(singleStreamPartition())
                         .local(ImmutableList.of(sorted("a", ASC_NULLS_FIRST)))
                         .build())
                 .add(builder()
-                        .global(distributed(hashPartitioned(ImmutableList.of(symbol("a")))))
+                        .global(hashDistributedOn("a"))
                         .build())
                 .build();
 
         List<ActualProperties> expected = ImmutableList.<ActualProperties>builder()
                 .add(builder()
-                        .global(distributed(partitioned(ImmutableSet.of(symbol("a")))))
+                        .global(streamPartitionedOn("a"))
                         .build())
                 .add(builder()
-                        .global(undistributed())
+                        .global(singleStreamPartition())
                         .build())
                 .add(builder()
-                        .global(distributed(hashPartitioned(ImmutableList.of(symbol("a")))))
+                        .global(hashDistributedOn("a"))
                         .build())
                 .add(builder()
-                        .global(distributed(singlePartition()))
+                        .global(singleStream())
                         .local(ImmutableList.of(constant("a"), sorted("b", ASC_NULLS_FIRST)))
                         .build())
                 .add(builder()
-                        .global(undistributed())
+                        .global(singleStreamPartition())
                         .local(ImmutableList.of(sorted("a", ASC_NULLS_FIRST)))
                         .build())
                 .add(builder()
-                        .global(distributed(hashPartitioned(ImmutableList.of(symbol("a")))))
+                        .global(hashDistributedOn("a"))
                         .build())
                 .add(builder()
-                        .global(distributed())
+                        .global(arbitraryPartition())
                         .local(ImmutableList.of(grouped("a", "b")))
                         .build())
                 .add(builder()
-                        .global(distributed())
+                        .global(arbitraryPartition())
                         .build())
                 .build();
-        Assert.assertEquals(stableSort(input, preference), expected);
+        assertEquals(stableSort(input, preference), expected);
     }
 
     @Test
     public void testPickLayoutGrouped()
-            throws Exception
     {
         Comparator<ActualProperties> preference = streamingExecutionPreference
                 (PreferredProperties.local(ImmutableList.of(grouped("a"))));
 
         List<ActualProperties> input = ImmutableList.<ActualProperties>builder()
                 .add(builder()
-                        .global(distributed(partitioned(ImmutableSet.of(symbol("a")))))
+                        .global(streamPartitionedOn("a"))
                         .build())
                 .add(builder()
-                        .global(undistributed())
+                        .global(singleStreamPartition())
                         .build())
                 .add(builder()
-                        .global(distributed())
+                        .global(arbitraryPartition())
                         .local(ImmutableList.of(grouped("a", "b")))
                         .build())
                 .add(builder()
-                        .global(distributed())
+                        .global(arbitraryPartition())
                         .build())
                 .add(builder()
-                        .global(distributed(hashPartitioned(ImmutableList.of(symbol("a")))))
+                        .global(hashDistributedOn("a"))
                         .build())
                 .add(builder()
-                        .global(distributed(singlePartition()))
+                        .global(singleStream())
                         .local(ImmutableList.of(constant("a"), sorted("b", ASC_NULLS_FIRST)))
                         .build())
                 .add(builder()
-                        .global(undistributed())
+                        .global(singleStreamPartition())
                         .local(ImmutableList.of(sorted("a", ASC_NULLS_FIRST)))
                         .build())
                 .add(builder()
-                        .global(distributed(hashPartitioned(ImmutableList.of(symbol("a")))))
+                        .global(hashDistributedOn("a"))
                         .build())
                 .build();
 
         List<ActualProperties> expected = ImmutableList.<ActualProperties>builder()
                 .add(builder()
-                        .global(distributed(singlePartition()))
+                        .global(singleStream())
                         .local(ImmutableList.of(constant("a"), sorted("b", ASC_NULLS_FIRST)))
                         .build())
                 .add(builder()
-                        .global(undistributed())
+                        .global(singleStreamPartition())
                         .local(ImmutableList.of(sorted("a", ASC_NULLS_FIRST)))
                         .build())
                 .add(builder()
-                        .global(distributed(partitioned(ImmutableSet.of(symbol("a")))))
+                        .global(streamPartitionedOn("a"))
                         .build())
                 .add(builder()
-                        .global(undistributed())
+                        .global(singleStreamPartition())
                         .build())
                 .add(builder()
-                        .global(distributed())
+                        .global(arbitraryPartition())
                         .local(ImmutableList.of(grouped("a", "b")))
                         .build())
                 .add(builder()
-                        .global(distributed())
+                        .global(arbitraryPartition())
                         .build())
                 .add(builder()
-                        .global(distributed(hashPartitioned(ImmutableList.of(symbol("a")))))
+                        .global(hashDistributedOn("a"))
                         .build())
                 .add(builder()
-                        .global(distributed(hashPartitioned(ImmutableList.of(symbol("a")))))
+                        .global(hashDistributedOn("a"))
                         .build())
                 .build();
-        Assert.assertEquals(stableSort(input, preference), expected);
+        assertEquals(stableSort(input, preference), expected);
     }
 
     @Test
     public void testPickLayoutGroupedMultiple()
-            throws Exception
     {
         Comparator<ActualProperties> preference = streamingExecutionPreference
                 (PreferredProperties.local(ImmutableList.of(grouped("a", "b"))));
 
         List<ActualProperties> input = ImmutableList.<ActualProperties>builder()
                 .add(builder()
-                        .global(distributed(partitioned(ImmutableSet.of(symbol("a")))))
+                        .global(streamPartitionedOn("a"))
                         .build())
                 .add(builder()
-                        .global(undistributed())
+                        .global(singleStreamPartition())
                         .build())
                 .add(builder()
-                        .global(distributed())
+                        .global(arbitraryPartition())
                         .local(ImmutableList.of(grouped("a", "b")))
                         .build())
                 .add(builder()
-                        .global(distributed())
+                        .global(arbitraryPartition())
                         .build())
                 .add(builder()
-                        .global(distributed(hashPartitioned(ImmutableList.of(symbol("a")))))
+                        .global(hashDistributedOn("a"))
                         .build())
                 .add(builder()
-                        .global(distributed(singlePartition()))
+                        .global(singleStream())
                         .local(ImmutableList.of(constant("a"), sorted("b", ASC_NULLS_FIRST)))
                         .build())
                 .add(builder()
-                        .global(undistributed())
+                        .global(singleStreamPartition())
                         .local(ImmutableList.of(sorted("a", ASC_NULLS_FIRST)))
                         .build())
                 .add(builder()
-                        .global(distributed(hashPartitioned(ImmutableList.of(symbol("a")))))
+                        .global(hashDistributedOn("a"))
                         .build())
                 .build();
 
         List<ActualProperties> expected = ImmutableList.<ActualProperties>builder()
                 .add(builder()
-                        .global(distributed())
+                        .global(arbitraryPartition())
                         .local(ImmutableList.of(grouped("a", "b")))
                         .build())
                 .add(builder()
-                        .global(distributed(singlePartition()))
+                        .global(singleStream())
                         .local(ImmutableList.of(constant("a"), sorted("b", ASC_NULLS_FIRST)))
                         .build())
                 .add(builder()
-                        .global(undistributed())
+                        .global(singleStreamPartition())
                         .local(ImmutableList.of(sorted("a", ASC_NULLS_FIRST)))
                         .build())
                 .add(builder()
-                        .global(distributed(partitioned(ImmutableSet.of(symbol("a")))))
+                        .global(streamPartitionedOn("a"))
                         .build())
                 .add(builder()
-                        .global(undistributed())
+                        .global(singleStreamPartition())
                         .build())
                 .add(builder()
-                        .global(distributed())
+                        .global(arbitraryPartition())
                         .build())
                 .add(builder()
-                        .global(distributed(hashPartitioned(ImmutableList.of(symbol("a")))))
+                        .global(hashDistributedOn("a"))
                         .build())
                 .add(builder()
-                        .global(distributed(hashPartitioned(ImmutableList.of(symbol("a")))))
+                        .global(hashDistributedOn("a"))
                         .build())
                 .build();
-        Assert.assertEquals(stableSort(input, preference), expected);
+        assertEquals(stableSort(input, preference), expected);
     }
 
     @Test
     public void testPickLayoutGroupedMultipleProperties()
-            throws Exception
     {
         Comparator<ActualProperties> preference = streamingExecutionPreference
                 (PreferredProperties.local(ImmutableList.of(grouped("a"), grouped("b"))));
 
         List<ActualProperties> input = ImmutableList.<ActualProperties>builder()
                 .add(builder()
-                        .global(distributed(partitioned(ImmutableSet.of(symbol("a")))))
+                        .global(streamPartitionedOn("a"))
                         .build())
                 .add(builder()
-                        .global(undistributed())
+                        .global(singleStreamPartition())
                         .build())
                 .add(builder()
-                        .global(distributed())
+                        .global(arbitraryPartition())
                         .local(ImmutableList.of(grouped("a", "b")))
                         .build())
                 .add(builder()
-                        .global(distributed())
+                        .global(arbitraryPartition())
                         .build())
                 .add(builder()
-                        .global(distributed(hashPartitioned(ImmutableList.of(symbol("a")))))
+                        .global(hashDistributedOn("a"))
                         .build())
                 .add(builder()
-                        .global(distributed(singlePartition()))
+                        .global(singleStream())
                         .local(ImmutableList.of(constant("a"), sorted("b", ASC_NULLS_FIRST)))
                         .build())
                 .add(builder()
-                        .global(undistributed())
+                        .global(singleStreamPartition())
                         .local(ImmutableList.of(sorted("a", ASC_NULLS_FIRST)))
                         .build())
                 .add(builder()
-                        .global(distributed(hashPartitioned(ImmutableList.of(symbol("a")))))
+                        .global(hashDistributedOn("a"))
                         .build())
                 .build();
 
         List<ActualProperties> expected = ImmutableList.<ActualProperties>builder()
                 .add(builder()
-                        .global(distributed(singlePartition()))
+                        .global(singleStream())
                         .local(ImmutableList.of(constant("a"), sorted("b", ASC_NULLS_FIRST)))
                         .build())
                 .add(builder()
-                        .global(undistributed())
+                        .global(singleStreamPartition())
                         .local(ImmutableList.of(sorted("a", ASC_NULLS_FIRST)))
                         .build())
                 .add(builder()
-                        .global(distributed(partitioned(ImmutableSet.of(symbol("a")))))
+                        .global(streamPartitionedOn("a"))
                         .build())
                 .add(builder()
-                        .global(undistributed())
+                        .global(singleStreamPartition())
                         .build())
                 .add(builder()
-                        .global(distributed())
+                        .global(arbitraryPartition())
                         .local(ImmutableList.of(grouped("a", "b")))
                         .build())
                 .add(builder()
-                        .global(distributed())
+                        .global(arbitraryPartition())
                         .build())
                 .add(builder()
-                        .global(distributed(hashPartitioned(ImmutableList.of(symbol("a")))))
+                        .global(hashDistributedOn("a"))
                         .build())
                 .add(builder()
-                        .global(distributed(hashPartitioned(ImmutableList.of(symbol("a")))))
+                        .global(hashDistributedOn("a"))
                         .build())
                 .build();
-        Assert.assertEquals(stableSort(input, preference), expected);
+        assertEquals(stableSort(input, preference), expected);
     }
 
     @Test
     public void testPickLayoutGroupedWithSort()
-            throws Exception
     {
         Comparator<ActualProperties> preference = streamingExecutionPreference
                 (PreferredProperties.local(ImmutableList.of(grouped("a"), sorted("b", ASC_NULLS_FIRST))));
 
         List<ActualProperties> input = ImmutableList.<ActualProperties>builder()
                 .add(builder()
-                        .global(distributed(partitioned(ImmutableSet.of(symbol("a")))))
+                        .global(streamPartitionedOn("a"))
                         .build())
                 .add(builder()
-                        .global(undistributed())
+                        .global(singleStreamPartition())
                         .build())
                 .add(builder()
-                        .global(distributed())
+                        .global(arbitraryPartition())
                         .local(ImmutableList.of(grouped("a", "b")))
                         .build())
                 .add(builder()
-                        .global(distributed())
+                        .global(arbitraryPartition())
                         .build())
                 .add(builder()
-                        .global(distributed(hashPartitioned(ImmutableList.of(symbol("a")))))
+                        .global(hashDistributedOn("a"))
                         .build())
                 .add(builder()
-                        .global(distributed(singlePartition()))
+                        .global(singleStream())
                         .local(ImmutableList.of(constant("a"), sorted("b", ASC_NULLS_FIRST)))
                         .build())
                 .add(builder()
-                        .global(undistributed())
+                        .global(singleStreamPartition())
                         .local(ImmutableList.of(sorted("a", ASC_NULLS_FIRST)))
                         .build())
                 .add(builder()
-                        .global(distributed(hashPartitioned(ImmutableList.of(symbol("a")))))
+                        .global(hashDistributedOn("a"))
                         .build())
                 .build();
 
         List<ActualProperties> expected = ImmutableList.<ActualProperties>builder()
                 .add(builder()
-                        .global(distributed(singlePartition()))
+                        .global(singleStream())
                         .local(ImmutableList.of(constant("a"), sorted("b", ASC_NULLS_FIRST)))
                         .build())
                 .add(builder()
-                        .global(undistributed())
+                        .global(singleStreamPartition())
                         .local(ImmutableList.of(sorted("a", ASC_NULLS_FIRST)))
                         .build())
                 .add(builder()
-                        .global(distributed(partitioned(ImmutableSet.of(symbol("a")))))
+                        .global(streamPartitionedOn("a"))
                         .build())
                 .add(builder()
-                        .global(undistributed())
+                        .global(singleStreamPartition())
                         .build())
                 .add(builder()
-                        .global(distributed())
+                        .global(arbitraryPartition())
                         .local(ImmutableList.of(grouped("a", "b")))
                         .build())
                 .add(builder()
-                        .global(distributed())
+                        .global(arbitraryPartition())
                         .build())
                 .add(builder()
-                        .global(distributed(hashPartitioned(ImmutableList.of(symbol("a")))))
+                        .global(hashDistributedOn("a"))
                         .build())
                 .add(builder()
-                        .global(distributed(hashPartitioned(ImmutableList.of(symbol("a")))))
+                        .global(hashDistributedOn("a"))
                         .build())
                 .build();
-        Assert.assertEquals(stableSort(input, preference), expected);
+        assertEquals(stableSort(input, preference), expected);
     }
 
     @Test
     public void testPickLayoutUnpartitionedWithGroupAndSort()
-            throws Exception
     {
         Comparator<ActualProperties> preference = streamingExecutionPreference
                 (PreferredProperties.undistributedWithLocal(ImmutableList.of(grouped("a"), sorted("b", ASC_NULLS_FIRST))));
 
         List<ActualProperties> input = ImmutableList.<ActualProperties>builder()
                 .add(builder()
-                        .global(distributed(partitioned(ImmutableSet.of(symbol("a")))))
+                        .global(streamPartitionedOn("a"))
                         .build())
                 .add(builder()
-                        .global(undistributed())
+                        .global(singleStreamPartition())
                         .build())
                 .add(builder()
-                        .global(distributed())
+                        .global(arbitraryPartition())
                         .local(ImmutableList.of(grouped("a", "b")))
                         .build())
                 .add(builder()
-                        .global(distributed())
+                        .global(arbitraryPartition())
                         .build())
                 .add(builder()
-                        .global(distributed(hashPartitioned(ImmutableList.of(symbol("a")))))
+                        .global(hashDistributedOn("a"))
                         .build())
                 .add(builder()
-                        .global(distributed(singlePartition()))
+                        .global(singleStream())
                         .local(ImmutableList.of(constant("a"), sorted("b", ASC_NULLS_FIRST)))
                         .build())
                 .add(builder()
-                        .global(undistributed())
+                        .global(singleStreamPartition())
                         .local(ImmutableList.of(sorted("a", ASC_NULLS_FIRST)))
                         .build())
                 .add(builder()
-                        .global(distributed(hashPartitioned(ImmutableList.of(symbol("a")))))
+                        .global(hashDistributedOn("a"))
                         .build())
                 .build();
 
         List<ActualProperties> expected = ImmutableList.<ActualProperties>builder()
                 .add(builder()
-                        .global(undistributed())
+                        .global(singleStreamPartition())
                         .local(ImmutableList.of(sorted("a", ASC_NULLS_FIRST)))
                         .build())
                 .add(builder()
-                        .global(distributed(singlePartition()))
+                        .global(singleStream())
                         .local(ImmutableList.of(constant("a"), sorted("b", ASC_NULLS_FIRST)))
                         .build())
                 .add(builder()
-                        .global(undistributed())
+                        .global(singleStreamPartition())
                         .build())
                 .add(builder()
-                        .global(distributed(partitioned(ImmutableSet.of(symbol("a")))))
+                        .global(streamPartitionedOn("a"))
                         .build())
                 .add(builder()
-                        .global(distributed())
+                        .global(arbitraryPartition())
                         .local(ImmutableList.of(grouped("a", "b")))
                         .build())
                 .add(builder()
-                        .global(distributed())
+                        .global(arbitraryPartition())
                         .build())
                 .add(builder()
-                        .global(distributed(hashPartitioned(ImmutableList.of(symbol("a")))))
+                        .global(hashDistributedOn("a"))
                         .build())
                 .add(builder()
-                        .global(distributed(hashPartitioned(ImmutableList.of(symbol("a")))))
+                        .global(hashDistributedOn("a"))
                         .build())
                 .build();
-        Assert.assertEquals(stableSort(input, preference), expected);
+        assertEquals(stableSort(input, preference), expected);
     }
 
     @Test
     public void testPickLayoutPartitionedWithGroup()
-            throws Exception
     {
         Comparator<ActualProperties> preference = streamingExecutionPreference
                 (PreferredProperties.partitionedWithLocal(
-                        ImmutableSet.of(symbol("a")),
+                        ImmutableSet.of(variable("a")),
                         ImmutableList.of(grouped("a"))));
 
         List<ActualProperties> input = ImmutableList.<ActualProperties>builder()
                 .add(builder()
-                        .global(distributed(partitioned(ImmutableSet.of(symbol("a")))))
+                        .global(streamPartitionedOn("a"))
                         .build())
                 .add(builder()
-                        .global(undistributed())
+                        .global(singleStreamPartition())
                         .build())
                 .add(builder()
-                        .global(distributed())
+                        .global(arbitraryPartition())
                         .local(ImmutableList.of(grouped("a", "b")))
                         .build())
                 .add(builder()
-                        .global(distributed())
+                        .global(arbitraryPartition())
                         .build())
                 .add(builder()
-                        .global(distributed(hashPartitioned(ImmutableList.of(symbol("a")))))
+                        .global(hashDistributedOn("a"))
                         .build())
                 .add(builder()
-                        .global(distributed(singlePartition()))
+                        .global(singleStream())
                         .local(ImmutableList.of(constant("a"), sorted("b", ASC_NULLS_FIRST)))
                         .build())
                 .add(builder()
-                        .global(undistributed())
+                        .global(singleStreamPartition())
                         .local(ImmutableList.of(sorted("a", ASC_NULLS_FIRST)))
                         .build())
                 .add(builder()
-                        .global(distributed(hashPartitioned(ImmutableList.of(symbol("a")))))
+                        .global(hashDistributedOn("a"))
                         .build())
                 .build();
 
         List<ActualProperties> expected = ImmutableList.<ActualProperties>builder()
                 .add(builder()
-                        .global(distributed(singlePartition()))
+                        .global(singleStream())
                         .local(ImmutableList.of(constant("a"), sorted("b", ASC_NULLS_FIRST)))
                         .build())
                 .add(builder()
-                        .global(undistributed())
+                        .global(singleStreamPartition())
                         .local(ImmutableList.of(sorted("a", ASC_NULLS_FIRST)))
                         .build())
                 .add(builder()
-                        .global(distributed(partitioned(ImmutableSet.of(symbol("a")))))
+                        .global(streamPartitionedOn("a"))
                         .build())
                 .add(builder()
-                        .global(undistributed())
+                        .global(singleStreamPartition())
                         .build())
                 .add(builder()
-                        .global(distributed(hashPartitioned(ImmutableList.of(symbol("a")))))
+                        .global(hashDistributedOn("a"))
                         .build())
                 .add(builder()
-                        .global(distributed(hashPartitioned(ImmutableList.of(symbol("a")))))
+                        .global(hashDistributedOn("a"))
                         .build())
                 .add(builder()
-                        .global(distributed())
+                        .global(arbitraryPartition())
                         .local(ImmutableList.of(grouped("a", "b")))
                         .build())
                 .add(builder()
-                        .global(distributed())
+                        .global(arbitraryPartition())
                         .build())
                 .build();
-        Assert.assertEquals(stableSort(input, preference), expected);
+        assertEquals(stableSort(input, preference), expected);
     }
 
     private static <T> List<T> stableSort(List<T> list, Comparator<T> comparator)
@@ -756,23 +752,45 @@ public class TestAddExchanges
         return copy;
     }
 
-    private static ConstantProperty<Symbol> constant(String column)
+    private static Global hashDistributedOn(String... columnNames)
     {
-        return new ConstantProperty<>(symbol(column));
+        return partitionedOn(FIXED_HASH_DISTRIBUTION, arguments(columnNames), Optional.of(arguments(columnNames)));
     }
 
-    private static GroupingProperty<Symbol> grouped(String... columns)
+    public static Global singleStream()
     {
-        return new GroupingProperty<>(Lists.transform(Arrays.asList(columns), Symbol::new));
+        return Global.streamPartitionedOn(ImmutableList.of());
     }
 
-    private static SortingProperty<Symbol> sorted(String column, SortOrder order)
+    private static Global streamPartitionedOn(String... columnNames)
     {
-        return new SortingProperty<>(symbol(column), order);
+        return Global.streamPartitionedOn(arguments(columnNames));
     }
 
-    private static Symbol symbol(String name)
+    private static ConstantProperty<VariableReferenceExpression> constant(String column)
     {
-        return new Symbol(name);
+        return new ConstantProperty<>(variable(column));
+    }
+
+    private static GroupingProperty<VariableReferenceExpression> grouped(String... columns)
+    {
+        return new GroupingProperty<>(Lists.transform(Arrays.asList(columns), column -> new VariableReferenceExpression(column, BIGINT)));
+    }
+
+    private static SortingProperty<VariableReferenceExpression> sorted(String column, SortOrder order)
+    {
+        return new SortingProperty<>(variable(column), order);
+    }
+
+    private static VariableReferenceExpression variable(String name)
+    {
+        return new VariableReferenceExpression(name, BIGINT);
+    }
+
+    private static List<VariableReferenceExpression> arguments(String[] columnNames)
+    {
+        return Arrays.asList(columnNames).stream()
+                .map(column -> new VariableReferenceExpression(column, BIGINT))
+                .collect(toImmutableList());
     }
 }

@@ -18,17 +18,41 @@ import org.skife.jdbi.v2.tweak.ResultSetMapper;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.util.Objects;
+import java.util.Optional;
+import java.util.OptionalInt;
+import java.util.OptionalLong;
 
+import static com.facebook.presto.raptor.util.DatabaseUtil.getOptionalInt;
+import static com.facebook.presto.raptor.util.DatabaseUtil.getOptionalLong;
 import static com.google.common.base.MoreObjects.toStringHelper;
+import static java.util.Objects.requireNonNull;
 
 public final class Table
 {
     private final long tableId;
+    private final OptionalLong distributionId;
+    private final Optional<String> distributionName;
+    private final OptionalInt bucketCount;
+    private final OptionalLong temporalColumnId;
+    private final boolean organized;
+    private final boolean tableSupportsDeltaDelete;
 
-    public Table(long tableId)
+    public Table(
+            long tableId,
+            OptionalLong distributionId,
+            Optional<String> distributionName,
+            OptionalInt bucketCount,
+            OptionalLong temporalColumnId,
+            boolean organized,
+            boolean tableSupportsDeltaDelete)
     {
         this.tableId = tableId;
+        this.distributionId = requireNonNull(distributionId, "distributionId is null");
+        this.distributionName = requireNonNull(distributionName, "distributionName is null");
+        this.bucketCount = requireNonNull(bucketCount, "bucketCount is null");
+        this.temporalColumnId = requireNonNull(temporalColumnId, "temporalColumnId is null");
+        this.organized = organized;
+        this.tableSupportsDeltaDelete = tableSupportsDeltaDelete;
     }
 
     public long getTableId()
@@ -36,23 +60,34 @@ public final class Table
         return tableId;
     }
 
-    @Override
-    public int hashCode()
+    public OptionalLong getDistributionId()
     {
-        return Objects.hash(tableId);
+        return distributionId;
     }
 
-    @Override
-    public boolean equals(Object obj)
+    public Optional<String> getDistributionName()
     {
-        if (obj == this) {
-            return true;
-        }
-        if ((obj == null) || (getClass() != obj.getClass())) {
-            return false;
-        }
-        Table o = (Table) obj;
-        return tableId == o.tableId;
+        return distributionName;
+    }
+
+    public OptionalInt getBucketCount()
+    {
+        return bucketCount;
+    }
+
+    public OptionalLong getTemporalColumnId()
+    {
+        return temporalColumnId;
+    }
+
+    public boolean isOrganized()
+    {
+        return organized;
+    }
+
+    public boolean isTableSupportsDeltaDelete()
+    {
+        return tableSupportsDeltaDelete;
     }
 
     @Override
@@ -60,6 +95,12 @@ public final class Table
     {
         return toStringHelper(this)
                 .add("tableId", tableId)
+                .add("distributionId", distributionId.isPresent() ? distributionId.getAsLong() : null)
+                .add("bucketCount", bucketCount.isPresent() ? bucketCount.getAsInt() : null)
+                .add("temporalColumnId", temporalColumnId.isPresent() ? temporalColumnId.getAsLong() : null)
+                .add("organized", organized)
+                .add("tableSupportsDeltaDelete", tableSupportsDeltaDelete)
+                .omitNullValues()
                 .toString();
     }
 
@@ -70,7 +111,14 @@ public final class Table
         public Table map(int index, ResultSet r, StatementContext ctx)
                 throws SQLException
         {
-            return new Table(r.getLong("table_id"));
+            return new Table(
+                    r.getLong("table_id"),
+                    getOptionalLong(r, "distribution_id"),
+                    Optional.ofNullable(r.getString("distribution_name")),
+                    getOptionalInt(r, "bucket_count"),
+                    getOptionalLong(r, "temporal_column_id"),
+                    r.getBoolean("organization_enabled"),
+                    r.getBoolean("table_supports_delta_delete"));
         }
     }
 }

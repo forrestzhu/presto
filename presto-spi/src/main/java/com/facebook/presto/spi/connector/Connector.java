@@ -29,7 +29,8 @@ public interface Connector
     ConnectorTransactionHandle beginTransaction(IsolationLevel isolationLevel, boolean readOnly);
 
     /**
-     * Guaranteed to be called at most once per transaction.
+     * Guaranteed to be called at most once per transaction. The returned metadata will only be accessed
+     * in a single threaded context.
      */
     ConnectorMetadata getMetadata(ConnectorTransactionHandle transactionHandle);
 
@@ -60,17 +61,33 @@ public interface Connector
     }
 
     /**
-     * @throws UnsupportedOperationException if this connector does not support writing tables record at a time
+     * @throws UnsupportedOperationException if this connector does not support indexes
      */
-    default ConnectorRecordSinkProvider getRecordSinkProvider()
+    default ConnectorIndexProvider getIndexProvider()
     {
         throw new UnsupportedOperationException();
     }
 
     /**
-     * @throws UnsupportedOperationException if this connector does not support indexes
+     * @throws UnsupportedOperationException if this connector does not support partitioned table layouts
      */
-    default ConnectorIndexProvider getIndexProvider()
+    default ConnectorNodePartitioningProvider getNodePartitioningProvider()
+    {
+        throw new UnsupportedOperationException();
+    }
+
+    /**
+     * @throws UnsupportedOperationException if this connector does not need to optimize query plans
+     */
+    default ConnectorPlanOptimizerProvider getConnectorPlanOptimizerProvider()
+    {
+        throw new UnsupportedOperationException();
+    }
+
+    /**
+     * @throws UnsupportedOperationException if this connector does not support metadata updates
+     */
+    default ConnectorMetadataUpdaterProvider getConnectorMetadataUpdaterProvider()
     {
         throw new UnsupportedOperationException();
     }
@@ -100,9 +117,33 @@ public interface Connector
     }
 
     /**
+     * @return the schema properties for this connector
+     */
+    default List<PropertyMetadata<?>> getSchemaProperties()
+    {
+        return emptyList();
+    }
+
+    /**
+     * @return the analyze properties for this connector
+     */
+    default List<PropertyMetadata<?>> getAnalyzeProperties()
+    {
+        return emptyList();
+    }
+
+    /**
      * @return the table properties for this connector
      */
     default List<PropertyMetadata<?>> getTableProperties()
+    {
+        return emptyList();
+    }
+
+    /**
+     * @return the column properties for this connector
+     */
+    default List<PropertyMetadata<?>> getColumnProperties()
     {
         return emptyList();
     }
@@ -116,14 +157,17 @@ public interface Connector
     }
 
     /**
-     * Commit the transaction. Will be called at most once and will not be called if abort is called.
+     * Commit the transaction. Will be called at most once and will not be called if
+     * {@link #rollback(ConnectorTransactionHandle)} is called.
      */
     default void commit(ConnectorTransactionHandle transactionHandle)
     {
     }
 
     /**
-     * Rollback the transaction. Will be called at most once and will not be called if commit is called.
+     * Rollback the transaction. Will be called at most once and will not be called if
+     * {@link #commit(ConnectorTransactionHandle)} is called.
+     * Note: calls to this method may race with calls to the ConnectorMetadata.
      */
     default void rollback(ConnectorTransactionHandle transactionHandle)
     {
@@ -145,4 +189,9 @@ public interface Connector
      * have been returned from the connector.
      */
     default void shutdown() {}
+
+    default Set<ConnectorCapabilities> getCapabilities()
+    {
+        return emptySet();
+    }
 }

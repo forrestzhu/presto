@@ -19,9 +19,9 @@ import org.testng.annotations.Test;
 
 import java.util.Map;
 
-import static io.airlift.configuration.testing.ConfigAssertions.assertFullMapping;
-import static io.airlift.configuration.testing.ConfigAssertions.assertRecordedDefaults;
-import static io.airlift.configuration.testing.ConfigAssertions.recordDefaults;
+import static com.facebook.airlift.configuration.testing.ConfigAssertions.assertFullMapping;
+import static com.facebook.airlift.configuration.testing.ConfigAssertions.assertRecordedDefaults;
+import static com.facebook.airlift.configuration.testing.ConfigAssertions.recordDefaults;
 import static java.util.concurrent.TimeUnit.MINUTES;
 import static java.util.concurrent.TimeUnit.SECONDS;
 
@@ -32,6 +32,7 @@ public class TestBackupConfig
     {
         assertRecordedDefaults(recordDefaults(BackupConfig.class)
                 .setProvider(null)
+                .setTimeoutThreads(1000)
                 .setTimeout(new Duration(1, MINUTES))
                 .setBackupThreads(5));
     }
@@ -42,12 +43,14 @@ public class TestBackupConfig
         Map<String, String> properties = new ImmutableMap.Builder<String, String>()
                 .put("backup.provider", "file")
                 .put("backup.timeout", "42s")
+                .put("backup.timeout-threads", "13")
                 .put("backup.threads", "3")
                 .build();
 
         BackupConfig expected = new BackupConfig()
                 .setProvider("file")
                 .setTimeout(new Duration(42, SECONDS))
+                .setTimeoutThreads(13)
                 .setBackupThreads(3);
 
         assertFullMapping(properties, expected);

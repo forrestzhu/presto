@@ -20,18 +20,21 @@ import com.facebook.presto.execution.scheduler.NetworkLocation;
 import com.facebook.presto.execution.scheduler.NetworkTopology;
 import com.facebook.presto.execution.scheduler.NodeScheduler;
 import com.facebook.presto.execution.scheduler.NodeSchedulerConfig;
-import com.facebook.presto.execution.scheduler.NodeSelector;
+import com.facebook.presto.execution.scheduler.nodeSelection.NodeSelectionStats;
+import com.facebook.presto.execution.scheduler.nodeSelection.NodeSelector;
 import com.facebook.presto.metadata.InMemoryNodeManager;
-import com.facebook.presto.metadata.PrestoNode;
+import com.facebook.presto.metadata.InternalNode;
 import com.facebook.presto.metadata.Split;
+import com.facebook.presto.spi.ConnectorId;
 import com.facebook.presto.spi.ConnectorSplit;
 import com.facebook.presto.spi.HostAddress;
-import com.facebook.presto.spi.Node;
-import com.facebook.presto.sql.planner.plan.PlanNodeId;
+import com.facebook.presto.spi.plan.PlanNodeId;
+import com.facebook.presto.spi.schedule.NodeSelectionStrategy;
 import com.facebook.presto.testing.TestingTransactionHandle;
 import com.facebook.presto.util.FinalizerService;
 import com.google.common.base.Splitter;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMultimap;
 import com.google.common.collect.Iterators;
 import com.google.common.collect.Multimap;
 import org.openjdk.jmh.annotations.Benchmark;
@@ -61,12 +64,16 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 
-import static com.facebook.presto.execution.scheduler.NodeSchedulerConfig.LEGACY_NETWORK_TOPOLOGY;
-import static io.airlift.concurrent.Threads.daemonThreadsNamed;
+import static com.facebook.airlift.concurrent.Threads.daemonThreadsNamed;
+import static com.facebook.presto.execution.scheduler.NodeSchedulerConfig.NetworkTopologyType.BENCHMARK;
+import static com.facebook.presto.execution.scheduler.NodeSchedulerConfig.NetworkTopologyType.FLAT;
+import static com.facebook.presto.execution.scheduler.NodeSchedulerConfig.NetworkTopologyType.LEGACY;
+import static com.facebook.presto.spi.schedule.NodeSelectionStrategy.NO_PREFERENCE;
+import static java.util.concurrent.Executors.newCachedThreadPool;
+import static java.util.concurrent.Executors.newScheduledThreadPool;
 
 @SuppressWarnings("MethodMayBeStatic")
 @State(Scope.Thread)
@@ -84,21 +91,23 @@ public class BenchmarkNodeScheduler
     private static final int RACKS = DATA_NODES / 25;
     private static final int SPLITS = NODES * (MAX_SPLITS_PER_NODE + MAX_PENDING_SPLITS_PER_TASK_PER_NODE / 3);
     private static final int SPLIT_BATCH_SIZE = 100;
+    private static final ConnectorId CONNECTOR_ID = new ConnectorId("test_connector_id");
 
     @Benchmark
     @OperationsPerInvocation(SPLITS)
     public Object benchmark(BenchmarkData data)
-            throws Throwable
     {
         List<RemoteTask> remoteTasks = ImmutableList.copyOf(data.getTaskMap().values());
         Iterator<MockRemoteTaskFactory.MockRemoteTask> finishingTask = Iterators.cycle(data.getTaskMap().values());
         Iterator<Split> splits = data.getSplits().iterator();
         Set<Split> batch = new HashSet<>();
         while (splits.hasNext() || !batch.isEmpty()) {
-            Multimap<Node, Split> assignments = data.getNodeSelector().computeAssignments(batch, remoteTasks);
-            for (Node node : assignments.keySet()) {
+            Multimap<InternalNode, Split> assignments = data.getNodeSelector().computeAssignments(batch, remoteTasks).getAssignments();
+            for (InternalNode node : assignments.keySet()) {
                 MockRemoteTaskFactory.MockRemoteTask remoteTask = data.getTaskMap().get(node);
-                remoteTask.addSplits(new PlanNodeId("sourceId"), assignments.get(node));
+                remoteTask.addSplits(ImmutableMultimap.<PlanNodeId, Split>builder()
+                        .putAll(new PlanNodeId("sourceId"), assignments.get(node))
+                        .build());
                 remoteTask.startSplits(MAX_SPLITS_PER_NODE);
             }
             if (assignments.size() == batch.size()) {
@@ -120,49 +129,52 @@ public class BenchmarkNodeScheduler
     @State(Scope.Thread)
     public static class BenchmarkData
     {
-        @Param({LEGACY_NETWORK_TOPOLOGY, "benchmark", "flat"})
-        private String topologyName = LEGACY_NETWORK_TOPOLOGY;
+        @Param({LEGACY,
+                BENCHMARK,
+                FLAT})
+        private String topologyName = LEGACY;
 
         private FinalizerService finalizerService = new FinalizerService();
         private NodeSelector nodeSelector;
-        private Map<Node, MockRemoteTaskFactory.MockRemoteTask> taskMap = new HashMap<>();
+        private Map<InternalNode, MockRemoteTaskFactory.MockRemoteTask> taskMap = new HashMap<>();
         private List<Split> splits = new ArrayList<>();
 
         @Setup
         public void setup()
-                throws NoSuchMethodException, IllegalAccessException
         {
-            TestingTransactionHandle transactionHandle = TestingTransactionHandle.create("foo");
+            TestingTransactionHandle transactionHandle = TestingTransactionHandle.create();
 
             finalizerService.start();
             NodeTaskMap nodeTaskMap = new NodeTaskMap(finalizerService);
 
-            ImmutableList.Builder<Node> nodeBuilder = ImmutableList.builder();
+            ImmutableList.Builder<InternalNode> nodeBuilder = ImmutableList.builder();
             for (int i = 0; i < NODES; i++) {
-                nodeBuilder.add(new PrestoNode("node" + i, URI.create("http://" + addressForHost(i).getHostText()), NodeVersion.UNKNOWN));
+                nodeBuilder.add(new InternalNode("node" + i, URI.create("http://" + addressForHost(i).getHostText()), NodeVersion.UNKNOWN, false));
             }
-            List<Node> nodes = nodeBuilder.build();
-            MockRemoteTaskFactory remoteTaskFactory = new MockRemoteTaskFactory(Executors.newCachedThreadPool(daemonThreadsNamed("remoteTaskExecutor-%s")));
+            List<InternalNode> nodes = nodeBuilder.build();
+            MockRemoteTaskFactory remoteTaskFactory = new MockRemoteTaskFactory(
+                    newCachedThreadPool(daemonThreadsNamed("remoteTaskExecutor-%s")),
+                    newScheduledThreadPool(2, daemonThreadsNamed("remoteTaskScheduledExecutor-%s")));
             for (int i = 0; i < nodes.size(); i++) {
-                Node node = nodes.get(i);
+                InternalNode node = nodes.get(i);
                 ImmutableList.Builder<Split> initialSplits = ImmutableList.builder();
                 for (int j = 0; j < MAX_SPLITS_PER_NODE + MAX_PENDING_SPLITS_PER_TASK_PER_NODE; j++) {
-                    initialSplits.add(new Split("foo", transactionHandle, new TestSplitRemote(i)));
+                    initialSplits.add(new Split(CONNECTOR_ID, transactionHandle, new TestSplitRemote(i)));
                 }
-                TaskId taskId = new TaskId(new StageId("test", "1"), String.valueOf(i));
+                TaskId taskId = new TaskId("test", 1, 0, i);
                 MockRemoteTaskFactory.MockRemoteTask remoteTask = remoteTaskFactory.createTableScanTask(taskId, node, initialSplits.build(), nodeTaskMap.createPartitionedSplitCountTracker(node, taskId));
                 nodeTaskMap.addTask(node, remoteTask);
                 taskMap.put(node, remoteTask);
             }
 
             for (int i = 0; i < SPLITS; i++) {
-                splits.add(new Split("foo", transactionHandle, new TestSplitRemote(ThreadLocalRandom.current().nextInt(DATA_NODES))));
+                splits.add(new Split(CONNECTOR_ID, transactionHandle, new TestSplitRemote(ThreadLocalRandom.current().nextInt(DATA_NODES))));
             }
 
             InMemoryNodeManager nodeManager = new InMemoryNodeManager();
-            nodeManager.addNode("foo", nodes);
-            NodeScheduler nodeScheduler = new NodeScheduler(getNetworkTopology(), nodeManager, getNodeSchedulerConfig(), nodeTaskMap);
-            nodeSelector = nodeScheduler.createNodeSelector("foo");
+            nodeManager.addNode(CONNECTOR_ID, nodes);
+            NodeScheduler nodeScheduler = new NodeScheduler(getNetworkTopology(), nodeManager, new NodeSelectionStats(), getNodeSchedulerConfig(), nodeTaskMap);
+            nodeSelector = nodeScheduler.createNodeSelector(CONNECTOR_ID);
         }
 
         @TearDown
@@ -174,23 +186,23 @@ public class BenchmarkNodeScheduler
         private NodeSchedulerConfig getNodeSchedulerConfig()
         {
             return new NodeSchedulerConfig()
-                            .setMaxSplitsPerNode(MAX_SPLITS_PER_NODE)
-                            .setIncludeCoordinator(false)
-                            .setNetworkTopology(topologyName)
-                            .setMaxPendingSplitsPerNodePerTask(MAX_PENDING_SPLITS_PER_TASK_PER_NODE);
+                    .setMaxSplitsPerNode(MAX_SPLITS_PER_NODE)
+                    .setIncludeCoordinator(false)
+                    .setNetworkTopology(topologyName)
+                    .setMaxPendingSplitsPerTask(MAX_PENDING_SPLITS_PER_TASK_PER_NODE);
         }
 
         private NetworkTopology getNetworkTopology()
         {
             NetworkTopology topology;
             switch (topologyName) {
-                case LEGACY_NETWORK_TOPOLOGY:
+                case LEGACY:
                     topology = new LegacyNetworkTopology();
                     break;
-                case "flat":
+                case FLAT:
                     topology = new FlatNetworkTopology();
                     break;
-                case "benchmark":
+                case BENCHMARK:
                     topology = new BenchmarkNetworkTopology();
                     break;
                 default:
@@ -199,7 +211,7 @@ public class BenchmarkNodeScheduler
             return topology;
         }
 
-        public Map<Node, MockRemoteTaskFactory.MockRemoteTask> getTaskMap()
+        public Map<InternalNode, MockRemoteTaskFactory.MockRemoteTask> getTaskMap()
         {
             return taskMap;
         }
@@ -233,7 +245,7 @@ public class BenchmarkNodeScheduler
         {
             List<String> parts = new ArrayList<>(ImmutableList.copyOf(Splitter.on(".").split(address.getHostText())));
             Collections.reverse(parts);
-            return new NetworkLocation(parts);
+            return NetworkLocation.create(parts);
         }
 
         @Override
@@ -254,13 +266,13 @@ public class BenchmarkNodeScheduler
         }
 
         @Override
-        public boolean isRemotelyAccessible()
+        public NodeSelectionStrategy getNodeSelectionStrategy()
         {
-            return true;
+            return NO_PREFERENCE;
         }
 
         @Override
-        public List<HostAddress> getAddresses()
+        public List<HostAddress> getPreferredNodes(List<HostAddress> sortedCandidates)
         {
             return hosts;
         }

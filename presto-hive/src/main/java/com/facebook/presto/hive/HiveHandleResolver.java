@@ -16,10 +16,13 @@ package com.facebook.presto.hive;
 import com.facebook.presto.spi.ColumnHandle;
 import com.facebook.presto.spi.ConnectorHandleResolver;
 import com.facebook.presto.spi.ConnectorInsertTableHandle;
+import com.facebook.presto.spi.ConnectorMetadataUpdateHandle;
 import com.facebook.presto.spi.ConnectorOutputTableHandle;
 import com.facebook.presto.spi.ConnectorSplit;
 import com.facebook.presto.spi.ConnectorTableHandle;
 import com.facebook.presto.spi.ConnectorTableLayoutHandle;
+import com.facebook.presto.spi.connector.ConnectorPartitioningHandle;
+import com.facebook.presto.spi.connector.ConnectorTransactionHandle;
 
 public class HiveHandleResolver
         implements ConnectorHandleResolver
@@ -58,5 +61,23 @@ public class HiveHandleResolver
     public Class<? extends ConnectorInsertTableHandle> getInsertTableHandleClass()
     {
         return HiveInsertTableHandle.class;
+    }
+
+    @Override
+    public Class<? extends ConnectorTransactionHandle> getTransactionHandleClass()
+    {
+        return HiveTransactionHandle.class;
+    }
+
+    @Override
+    public Class<? extends ConnectorPartitioningHandle> getPartitioningHandleClass()
+    {
+        return HivePartitioningHandle.class;
+    }
+
+    @Override
+    public Class<? extends ConnectorMetadataUpdateHandle> getMetadataUpdateHandleClass()
+    {
+        return HiveMetadataUpdateHandle.class;
     }
 }

@@ -13,6 +13,9 @@
  */
 package com.facebook.presto.raptor.backup;
 
+import com.facebook.airlift.bootstrap.LifeCycleManager;
+import com.facebook.airlift.configuration.AbstractConfigurationAwareModule;
+import com.facebook.airlift.configuration.ConfigurationAwareModule;
 import com.facebook.presto.raptor.RaptorConnectorId;
 import com.google.common.collect.ImmutableMap;
 import com.google.inject.Binder;
@@ -20,8 +23,7 @@ import com.google.inject.Module;
 import com.google.inject.Provides;
 import com.google.inject.Scopes;
 import com.google.inject.util.Providers;
-import io.airlift.bootstrap.LifeCycleManager;
-import io.airlift.configuration.AbstractConfigurationAwareModule;
+import org.weakref.jmx.MBeanExporter;
 
 import javax.annotation.Nullable;
 import javax.inject.Singleton;
@@ -29,7 +31,8 @@ import javax.inject.Singleton;
 import java.util.Map;
 import java.util.Optional;
 
-import static io.airlift.configuration.ConfigBinder.configBinder;
+import static com.facebook.airlift.configuration.ConfigBinder.configBinder;
+import static org.weakref.jmx.ObjectNames.generatedNameOf;
 
 public class BackupModule
         extends AbstractConfigurationAwareModule
@@ -40,6 +43,7 @@ public class BackupModule
     {
         this.providers = ImmutableMap.<String, Module>builder()
                 .put("file", new FileBackupModule())
+                .put("http", new HttpBackupModule())
                 .putAll(providers)
                 .build();
     }
@@ -58,6 +62,9 @@ public class BackupModule
             if (module == null) {
                 binder.addError("Unknown backup provider: %s", provider);
             }
+            else if (module instanceof ConfigurationAwareModule) {
+                install((ConfigurationAwareModule) module);
+            }
             else {
                 binder.install(module);
             }
@@ -70,6 +77,7 @@ public class BackupModule
     private static Optional<BackupStore> createBackupStore(
             @Nullable BackupStore store,
             LifeCycleManager lifeCycleManager,
+            MBeanExporter exporter,
             RaptorConnectorId connectorId,
             BackupConfig config)
             throws Exception
@@ -78,8 +86,17 @@ public class BackupModule
             return Optional.empty();
         }
 
-        BackupStore proxy = new TimeoutBackupStore(store, connectorId.toString(), config.getTimeout());
+        BackupStore proxy = new TimeoutBackupStore(
+                store,
+                connectorId.toString(),
+                config.getTimeout(),
+                config.getTimeoutThreads());
+
         lifeCycleManager.addInstance(proxy);
-        return Optional.of(proxy);
+
+        BackupStore managed = new ManagedBackupStore(proxy);
+        exporter.export(generatedNameOf(BackupStore.class, connectorId.toString()), managed);
+
+        return Optional.of(managed);
     }
 }

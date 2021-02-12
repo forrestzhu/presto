@@ -13,6 +13,8 @@
  */
 package com.facebook.presto.raptor.backup;
 
+import com.facebook.airlift.concurrent.BoundedExecutor;
+import com.facebook.airlift.concurrent.ExecutorServiceAdapter;
 import com.facebook.presto.spi.PrestoException;
 import com.google.common.util.concurrent.SimpleTimeLimiter;
 import com.google.common.util.concurrent.TimeLimiter;
@@ -25,8 +27,8 @@ import java.io.File;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 
+import static com.facebook.airlift.concurrent.Threads.daemonThreadsNamed;
 import static com.facebook.presto.raptor.RaptorErrorCode.RAPTOR_BACKUP_TIMEOUT;
-import static io.airlift.concurrent.Threads.daemonThreadsNamed;
 import static java.util.Objects.requireNonNull;
 import static java.util.concurrent.Executors.newCachedThreadPool;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
@@ -37,13 +39,14 @@ public class TimeoutBackupStore
     private final ExecutorService executor;
     private final BackupStore store;
 
-    public TimeoutBackupStore(BackupStore store, String connectorId, Duration timeout)
+    public TimeoutBackupStore(BackupStore store, String connectorId, Duration timeout, int maxThreads)
     {
         requireNonNull(store, "store is null");
         requireNonNull(connectorId, "connectorId is null");
         requireNonNull(timeout, "timeout is null");
+
         this.executor = newCachedThreadPool(daemonThreadsNamed("backup-proxy-" + connectorId + "-%s"));
-        this.store = timeLimited(store, BackupStore.class, timeout, executor);
+        this.store = timeLimited(store, BackupStore.class, timeout, executor, maxThreads);
     }
 
     @PreDestroy
@@ -59,7 +62,7 @@ public class TimeoutBackupStore
             store.backupShard(uuid, source);
         }
         catch (UncheckedTimeoutException e) {
-            throw new PrestoException(RAPTOR_BACKUP_TIMEOUT, "Shard backup timed out");
+            timeoutException(uuid, "Shard backup timed out");
         }
     }
 
@@ -70,18 +73,18 @@ public class TimeoutBackupStore
             store.restoreShard(uuid, target);
         }
         catch (UncheckedTimeoutException e) {
-            throw new PrestoException(RAPTOR_BACKUP_TIMEOUT, "Shard restore timed out");
+            timeoutException(uuid, "Shard restore timed out");
         }
     }
 
     @Override
-    public void deleteShard(UUID uuid)
+    public boolean deleteShard(UUID uuid)
     {
         try {
-            store.deleteShard(uuid);
+            return store.deleteShard(uuid);
         }
         catch (UncheckedTimeoutException e) {
-            throw new PrestoException(RAPTOR_BACKUP_TIMEOUT, "Shard delete timed out");
+            throw timeoutException(uuid, "Shard delete timed out");
         }
     }
 
@@ -92,13 +95,19 @@ public class TimeoutBackupStore
             return store.shardExists(uuid);
         }
         catch (UncheckedTimeoutException e) {
-            throw new PrestoException(RAPTOR_BACKUP_TIMEOUT, "Shard existence check timed out");
+            throw timeoutException(uuid, "Shard existence check timed out");
         }
     }
 
-    private static <T> T timeLimited(T target, Class<T> clazz, Duration timeout, ExecutorService executor)
+    private static <T> T timeLimited(T target, Class<T> clazz, Duration timeout, ExecutorService executor, int maxThreads)
     {
-        TimeLimiter limiter = new SimpleTimeLimiter(executor);
+        executor = new ExecutorServiceAdapter(new BoundedExecutor(executor, maxThreads));
+        TimeLimiter limiter = SimpleTimeLimiter.create(executor);
         return limiter.newProxy(target, clazz, timeout.toMillis(), MILLISECONDS);
+    }
+
+    private static PrestoException timeoutException(UUID uuid, String message)
+    {
+        throw new PrestoException(RAPTOR_BACKUP_TIMEOUT, message + ": " + uuid);
     }
 }

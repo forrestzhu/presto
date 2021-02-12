@@ -13,36 +13,35 @@
  */
 package com.facebook.presto.type;
 
+import com.facebook.presto.common.NotSupportedException;
+import com.facebook.presto.common.Page;
+import com.facebook.presto.common.block.Block;
+import com.facebook.presto.common.block.BlockBuilder;
+import com.facebook.presto.common.type.DecimalType;
+import com.facebook.presto.common.type.FixedWidthType;
+import com.facebook.presto.common.type.StandardTypes;
+import com.facebook.presto.common.type.Type;
+import com.facebook.presto.common.type.TypeManager;
+import com.facebook.presto.common.type.TypeSignature;
+import com.facebook.presto.metadata.FunctionAndTypeManager;
 import com.facebook.presto.operator.HashGenerator;
 import com.facebook.presto.operator.InterpretedHashGenerator;
-import com.facebook.presto.spi.Page;
 import com.facebook.presto.spi.PrestoException;
-import com.facebook.presto.spi.block.Block;
-import com.facebook.presto.spi.block.BlockBuilder;
-import com.facebook.presto.spi.type.FixedWidthType;
-import com.facebook.presto.spi.type.Type;
-import com.facebook.presto.spi.type.TypeManager;
-import com.facebook.presto.spi.type.TypeSignature;
-import com.facebook.presto.spi.type.TypeSignatureParameter;
-import com.google.common.base.Throwables;
 import com.google.common.collect.ImmutableList;
 import io.airlift.slice.Slice;
 
 import java.lang.invoke.MethodHandle;
-import java.util.Arrays;
 import java.util.List;
 
+import static com.facebook.presto.common.type.BigintType.BIGINT;
 import static com.facebook.presto.spi.StandardErrorCode.NOT_SUPPORTED;
-import static com.facebook.presto.spi.type.BigintType.BIGINT;
-import static com.facebook.presto.util.ImmutableCollectors.toImmutableList;
 import static com.google.common.base.Preconditions.checkArgument;
-import static java.lang.String.format;
-import static java.util.Objects.requireNonNull;
+import static com.google.common.base.Throwables.throwIfUnchecked;
+import static com.google.common.collect.ImmutableList.toImmutableList;
 
 public final class TypeUtils
 {
-    public static final int EXPECTED_ARRAY_SIZE = 1024;
-    public static final int NULL_HASH_CODE = 0;
+    public static final long NULL_HASH_CODE = 0;
 
     private TypeUtils()
     {
@@ -56,7 +55,7 @@ public final class TypeUtils
         return defaultSize;
     }
 
-    public static int hashPosition(Type type, Block block, int position)
+    public static long hashPosition(Type type, Block block, int position)
     {
         if (block.isNull(position)) {
             return NULL_HASH_CODE;
@@ -90,7 +89,8 @@ public final class TypeUtils
             }
         }
         catch (Throwable throwable) {
-            throw Throwables.propagate(throwable);
+            throwIfUnchecked(throwable);
+            throw new RuntimeException(throwable);
         }
     }
 
@@ -101,26 +101,44 @@ public final class TypeUtils
         if (leftIsNull || rightIsNull) {
             return leftIsNull && rightIsNull;
         }
-        return type.equalTo(leftBlock, leftPosition, rightBlock, rightPosition);
+
+        try {
+            return type.equalTo(leftBlock, leftPosition, rightBlock, rightPosition);
+        }
+        catch (NotSupportedException e) {
+            throw new PrestoException(NOT_SUPPORTED, e.getMessage(), e);
+        }
     }
 
-    public static List<Type> resolveTypes(List<TypeSignature> typeNames, TypeManager typeManager)
+    public static Type resolveType(TypeSignature typeName, TypeManager typeManager)
+    {
+        return typeManager.getType(typeName);
+    }
+
+    public static boolean isIntegralType(TypeSignature typeName, FunctionAndTypeManager functionAndTypeManager)
+    {
+        switch (typeName.getBase()) {
+            case StandardTypes.BIGINT:
+            case StandardTypes.INTEGER:
+            case StandardTypes.SMALLINT:
+            case StandardTypes.TINYINT:
+                return true;
+            case StandardTypes.DECIMAL:
+                DecimalType decimalType = (DecimalType) resolveType(typeName, functionAndTypeManager);
+                return decimalType.getScale() == 0;
+            default:
+                return false;
+        }
+    }
+
+    public static List<Type> resolveTypes(List<TypeSignature> typeNames, FunctionAndTypeManager functionAndTypeManager)
     {
         return typeNames.stream()
-                .map((TypeSignature type) -> requireNonNull(typeManager.getType(type), format("Type '%s' not found", type)))
+                .map((TypeSignature type) -> resolveType(type, functionAndTypeManager))
                 .collect(toImmutableList());
     }
 
-    public static TypeSignature parameterizedTypeName(String base, TypeSignature... argumentNames)
-    {
-        ImmutableList.Builder<TypeSignatureParameter> parameters = ImmutableList.builder();
-        for (TypeSignature signature : argumentNames) {
-            parameters.add(TypeSignatureParameter.of(signature));
-        }
-        return new TypeSignature(base, parameters.build());
-    }
-
-    public static int getHashPosition(List<? extends Type> hashTypes, Block[] hashBlocks, int position)
+    public static long getHashPosition(List<? extends Type> hashTypes, Block[] hashBlocks, int position)
     {
         int[] hashChannels = new int[hashBlocks.length];
         for (int i = 0; i < hashBlocks.length; i++) {
@@ -150,17 +168,15 @@ public final class TypeUtils
 
     public static Page getHashPage(Page page, List<? extends Type> types, List<Integer> hashChannels)
     {
-        Block[] blocks = Arrays.copyOf(page.getBlocks(), page.getChannelCount() + 1);
         ImmutableList.Builder<Type> hashTypes = ImmutableList.builder();
         Block[] hashBlocks = new Block[hashChannels.size()];
         int hashBlockIndex = 0;
 
         for (int channel : hashChannels) {
             hashTypes.add(types.get(channel));
-            hashBlocks[hashBlockIndex++] = blocks[channel];
+            hashBlocks[hashBlockIndex++] = page.getBlock(channel);
         }
-        blocks[page.getChannelCount()] = getHashBlock(hashTypes.build(), hashBlocks);
-        return new Page(blocks);
+        return page.appendColumn(getHashBlock(hashTypes.build(), hashBlocks));
     }
 
     public static void checkElementNotNull(boolean isNull, String errorMsg)

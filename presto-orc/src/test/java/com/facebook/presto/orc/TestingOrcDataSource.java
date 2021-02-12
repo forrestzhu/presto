@@ -14,7 +14,6 @@
 package com.facebook.presto.orc;
 
 import com.google.common.collect.ImmutableList;
-import io.airlift.slice.FixedLengthSliceInput;
 
 import java.io.IOException;
 import java.util.List;
@@ -35,6 +34,12 @@ class TestingOrcDataSource
         this.delegate = requireNonNull(delegate, "delegate is null");
     }
 
+    @Override
+    public OrcDataSourceId getId()
+    {
+        return delegate.getId();
+    }
+
     public int getReadCount()
     {
         return readCount;
@@ -43,6 +48,12 @@ class TestingOrcDataSource
     public List<DiskRange> getLastReadRanges()
     {
         return lastReadRanges;
+    }
+
+    @Override
+    public long getReadBytes()
+    {
+        return delegate.getReadBytes();
     }
 
     @Override
@@ -76,7 +87,7 @@ class TestingOrcDataSource
     }
 
     @Override
-    public <K> Map<K, FixedLengthSliceInput> readFully(Map<K, DiskRange> diskRanges)
+    public <K> Map<K, OrcDataSourceInput> readFully(Map<K, DiskRange> diskRanges)
             throws IOException
     {
         readCount += diskRanges.size();

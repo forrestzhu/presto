@@ -13,10 +13,10 @@
  */
 package com.facebook.presto.ml.type;
 
-import com.facebook.presto.spi.type.ParameterKind;
-import com.facebook.presto.spi.type.Type;
-import com.facebook.presto.spi.type.TypeParameter;
-import com.facebook.presto.type.ParametricType;
+import com.facebook.presto.common.type.ParameterKind;
+import com.facebook.presto.common.type.ParametricType;
+import com.facebook.presto.common.type.Type;
+import com.facebook.presto.common.type.TypeParameter;
 
 import java.util.List;
 
@@ -38,7 +38,7 @@ public class ClassifierParametricType
     {
         checkArgument(parameters.size() == 1, "Expected only one type, got %s", parameters);
         checkArgument(
-                parameters.get(0).getKind() == ParameterKind.TYPE_SIGNATURE,
+                parameters.get(0).getKind() == ParameterKind.TYPE,
                 "Expected type as a parameter, got %s",
                 parameters);
         return new ClassifierType(parameters.get(0).getType());
