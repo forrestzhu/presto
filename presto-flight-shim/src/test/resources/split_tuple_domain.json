@@ -1,0 +1,42 @@
+{
+  "@type" : "${connectorName}",
+  "connectorId" : "${connectorId}",
+  "schemaName" : "tpch",
+  "tableName" : "lineitem",
+  "tupleDomain" : {
+  "columnDomains" : [ {
+    "column" : {
+      "@type" : "${connectorName}",
+      "connectorId" : "${connectorId}",
+      "columnName" : "orderkey",
+      "jdbcTypeHandle" : {
+        "jdbcType" : -5,
+        "jdbcTypeName" : "bigint",
+        "columnSize" : 8,
+        "decimalDigits" : 0
+      },
+      "columnType" : "bigint",
+      "nullable" : false
+    },
+    "domain" : {
+      "values" : {
+        "@type" : "sortable",
+        "type" : "bigint",
+        "ranges" : [ {
+          "low" : {
+            "type" : "bigint",
+            "valueBlock" : "CgAAAExPTkdfQVJSQVkBAAAAAAMAAAAAAAAA",
+            "bound" : "EXACTLY"
+          },
+          "high" : {
+            "type" : "bigint",
+            "valueBlock" : "CgAAAExPTkdfQVJSQVkBAAAAAAMAAAAAAAAA",
+            "bound" : "EXACTLY"
+          }
+        } ]
+      },
+      "nullAllowed" : false
+    }
+  } ]
+  }
+}

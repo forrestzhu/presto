@@ -14,22 +14,37 @@
 package com.facebook.presto.spi.connector;
 
 import com.facebook.presto.spi.SystemTable;
+import com.facebook.presto.spi.function.table.ConnectorTableFunction;
+import com.facebook.presto.spi.function.table.ConnectorTableFunctionHandle;
+import com.facebook.presto.spi.function.table.TableFunctionProcessorProvider;
+import com.facebook.presto.spi.procedure.DistributedProcedure;
 import com.facebook.presto.spi.procedure.Procedure;
 import com.facebook.presto.spi.session.PropertyMetadata;
 import com.facebook.presto.spi.transaction.IsolationLevel;
 
 import java.util.List;
 import java.util.Set;
+import java.util.function.Function;
 
+import static com.facebook.presto.spi.connector.EmptyConnectorCommitHandle.INSTANCE;
 import static java.util.Collections.emptyList;
 import static java.util.Collections.emptySet;
 
 public interface Connector
 {
-    ConnectorTransactionHandle beginTransaction(IsolationLevel isolationLevel, boolean readOnly);
+    default ConnectorTransactionHandle beginTransaction(IsolationLevel isolationLevel, boolean readOnly)
+    {
+        throw new UnsupportedOperationException();
+    }
+
+    default ConnectorTransactionHandle beginTransaction(IsolationLevel isolationLevel, boolean autoCommitContext, boolean readOnly)
+    {
+        return beginTransaction(isolationLevel, readOnly);
+    }
 
     /**
-     * Guaranteed to be called at most once per transaction.
+     * Guaranteed to be called at most once per transaction. The returned metadata will only be accessed
+     * in a single threaded context.
      */
     ConnectorMetadata getMetadata(ConnectorTransactionHandle transactionHandle);
 
@@ -60,17 +75,33 @@ public interface Connector
     }
 
     /**
-     * @throws UnsupportedOperationException if this connector does not support writing tables record at a time
+     * @throws UnsupportedOperationException if this connector does not support indexes
      */
-    default ConnectorRecordSinkProvider getRecordSinkProvider()
+    default ConnectorIndexProvider getIndexProvider()
     {
         throw new UnsupportedOperationException();
     }
 
     /**
-     * @throws UnsupportedOperationException if this connector does not support indexes
+     * @throws UnsupportedOperationException if this connector does not support partitioned table layouts
      */
-    default ConnectorIndexProvider getIndexProvider()
+    default ConnectorNodePartitioningProvider getNodePartitioningProvider()
+    {
+        throw new UnsupportedOperationException();
+    }
+
+    /**
+     * @throws UnsupportedOperationException if this connector does not need to optimize query plans
+     */
+    default ConnectorPlanOptimizerProvider getConnectorPlanOptimizerProvider()
+    {
+        throw new UnsupportedOperationException();
+    }
+
+    /**
+     * @throws UnsupportedOperationException if this connector does not support connector specific codec
+     */
+    default ConnectorCodecProvider getConnectorCodecProvider()
     {
         throw new UnsupportedOperationException();
     }
@@ -92,9 +123,59 @@ public interface Connector
     }
 
     /**
+     * @return the set of distributed procedures provided by this connector
+     */
+    default Set<DistributedProcedure> getDistributedProcedures()
+    {
+        return emptySet();
+    }
+
+    /**
+     * @return the set of table functions provided by this connector
+     */
+    default Set<ConnectorTableFunction> getTableFunctions()
+    {
+        return emptySet();
+    }
+
+    /**
+     * @return the table function processor provider for the connector
+     */
+    default Function<ConnectorTableFunctionHandle, TableFunctionProcessorProvider> getTableFunctionProcessorProvider()
+    {
+        return handle -> {
+            throw new UnsupportedOperationException();
+        };
+    }
+
+    /**
+     * @return the set of functions provided by this connector
+     */
+    default Set<Class<?>> getSystemFunctions()
+    {
+        return emptySet();
+    }
+
+    /**
      * @return the system properties for this connector
      */
     default List<PropertyMetadata<?>> getSessionProperties()
+    {
+        return emptyList();
+    }
+
+    /**
+     * @return the schema properties for this connector
+     */
+    default List<PropertyMetadata<?>> getSchemaProperties()
+    {
+        return emptyList();
+    }
+
+    /**
+     * @return the analyze properties for this connector
+     */
+    default List<PropertyMetadata<?>> getAnalyzeProperties()
     {
         return emptyList();
     }
@@ -108,6 +189,22 @@ public interface Connector
     }
 
     /**
+     * @return the column properties for this connector
+     */
+    default List<PropertyMetadata<?>> getColumnProperties()
+    {
+        return emptyList();
+    }
+
+    /**
+     * @return the materialized view properties for this connector
+     */
+    default List<PropertyMetadata<?>> getMaterializedViewProperties()
+    {
+        return emptyList();
+    }
+
+    /**
      * @throws UnsupportedOperationException if this connector does not have an access control
      */
     default ConnectorAccessControl getAccessControl()
@@ -116,14 +213,18 @@ public interface Connector
     }
 
     /**
-     * Commit the transaction. Will be called at most once and will not be called if abort is called.
+     * Commit the transaction. Will be called at most once and will not be called if
+     * {@link #rollback(ConnectorTransactionHandle)} is called.
      */
-    default void commit(ConnectorTransactionHandle transactionHandle)
+    default ConnectorCommitHandle commit(ConnectorTransactionHandle transactionHandle)
     {
+        return INSTANCE;
     }
 
     /**
-     * Rollback the transaction. Will be called at most once and will not be called if commit is called.
+     * Rollback the transaction. Will be called at most once and will not be called if
+     * {@link #commit(ConnectorTransactionHandle)} is called.
+     * Note: calls to this method may race with calls to the ConnectorMetadata.
      */
     default void rollback(ConnectorTransactionHandle transactionHandle)
     {
@@ -145,4 +246,9 @@ public interface Connector
      * have been returned from the connector.
      */
     default void shutdown() {}
+
+    default Set<ConnectorCapabilities> getCapabilities()
+    {
+        return emptySet();
+    }
 }

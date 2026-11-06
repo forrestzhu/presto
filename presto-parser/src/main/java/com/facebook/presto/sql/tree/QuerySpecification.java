@@ -13,6 +13,8 @@
  */
 package com.facebook.presto.sql.tree;
 
+import com.google.common.collect.ImmutableList;
+
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -26,21 +28,25 @@ public class QuerySpecification
     private final Select select;
     private final Optional<Relation> from;
     private final Optional<Expression> where;
-    private final List<GroupingElement> groupBy;
+    private final Optional<GroupBy> groupBy;
     private final Optional<Expression> having;
-    private final List<SortItem> orderBy;
+    private final List<WindowDefinition> windows;
+    private final Optional<OrderBy> orderBy;
+    private final Optional<Offset> offset;
     private final Optional<String> limit;
 
     public QuerySpecification(
             Select select,
             Optional<Relation> from,
             Optional<Expression> where,
-            List<GroupingElement> groupBy,
+            Optional<GroupBy> groupBy,
             Optional<Expression> having,
-            List<SortItem> orderBy,
+            List<WindowDefinition> windows,
+            Optional<OrderBy> orderBy,
+            Optional<Offset> offset,
             Optional<String> limit)
     {
-        this(Optional.empty(), select, from, where, groupBy, having, orderBy, limit);
+        this(Optional.empty(), select, from, where, groupBy, having, windows, orderBy, offset, limit);
     }
 
     public QuerySpecification(
@@ -48,12 +54,14 @@ public class QuerySpecification
             Select select,
             Optional<Relation> from,
             Optional<Expression> where,
-            List<GroupingElement> groupBy,
+            Optional<GroupBy> groupBy,
             Optional<Expression> having,
-            List<SortItem> orderBy,
+            List<WindowDefinition> windows,
+            Optional<OrderBy> orderBy,
+            Optional<Offset> offset,
             Optional<String> limit)
     {
-        this(Optional.of(location), select, from, where, groupBy, having, orderBy, limit);
+        this(Optional.of(location), select, from, where, groupBy, having, windows, orderBy, offset, limit);
     }
 
     private QuerySpecification(
@@ -61,9 +69,11 @@ public class QuerySpecification
             Select select,
             Optional<Relation> from,
             Optional<Expression> where,
-            List<GroupingElement> groupBy,
+            Optional<GroupBy> groupBy,
             Optional<Expression> having,
-            List<SortItem> orderBy,
+            List<WindowDefinition> windows,
+            Optional<OrderBy> orderBy,
+            Optional<Offset> offset,
             Optional<String> limit)
     {
         super(location);
@@ -72,7 +82,9 @@ public class QuerySpecification
         requireNonNull(where, "where is null");
         requireNonNull(groupBy, "groupBy is null");
         requireNonNull(having, "having is null");
+        requireNonNull(windows, "windows is null");
         requireNonNull(orderBy, "orderBy is null");
+        requireNonNull(offset, "offset is null");
         requireNonNull(limit, "limit is null");
 
         this.select = select;
@@ -80,7 +92,9 @@ public class QuerySpecification
         this.where = where;
         this.groupBy = groupBy;
         this.having = having;
+        this.windows = ImmutableList.copyOf(windows);
         this.orderBy = orderBy;
+        this.offset = offset;
         this.limit = limit;
     }
 
@@ -99,7 +113,7 @@ public class QuerySpecification
         return where;
     }
 
-    public List<GroupingElement> getGroupBy()
+    public Optional<GroupBy> getGroupBy()
     {
         return groupBy;
     }
@@ -109,9 +123,19 @@ public class QuerySpecification
         return having;
     }
 
-    public List<SortItem> getOrderBy()
+    public List<WindowDefinition> getWindows()
+    {
+        return windows;
+    }
+
+    public Optional<OrderBy> getOrderBy()
     {
         return orderBy;
+    }
+
+    public Optional<Offset> getOffset()
+    {
+        return offset;
     }
 
     public Optional<String> getLimit()
@@ -126,6 +150,21 @@ public class QuerySpecification
     }
 
     @Override
+    public List<Node> getChildren()
+    {
+        ImmutableList.Builder<Node> nodes = ImmutableList.builder();
+        nodes.add(select);
+        from.ifPresent(nodes::add);
+        where.ifPresent(nodes::add);
+        groupBy.ifPresent(nodes::add);
+        having.ifPresent(nodes::add);
+        nodes.addAll(windows);
+        orderBy.ifPresent(nodes::add);
+        offset.ifPresent(nodes::add);
+        return nodes.build();
+    }
+
+    @Override
     public String toString()
     {
         return toStringHelper(this)
@@ -134,7 +173,9 @@ public class QuerySpecification
                 .add("where", where.orElse(null))
                 .add("groupBy", groupBy)
                 .add("having", having.orElse(null))
+                .add("windows", windows.isEmpty() ? null : windows)
                 .add("orderBy", orderBy)
+                .add("offset", offset.orElse(null))
                 .add("limit", limit.orElse(null))
                 .toString();
     }
@@ -154,13 +195,15 @@ public class QuerySpecification
                 Objects.equals(where, o.where) &&
                 Objects.equals(groupBy, o.groupBy) &&
                 Objects.equals(having, o.having) &&
+                Objects.equals(windows, o.windows) &&
                 Objects.equals(orderBy, o.orderBy) &&
+                Objects.equals(offset, o.offset) &&
                 Objects.equals(limit, o.limit);
     }
 
     @Override
     public int hashCode()
     {
-        return Objects.hash(select, from, where, groupBy, having, orderBy, limit);
+        return Objects.hash(select, from, where, groupBy, having, windows, orderBy, offset, limit);
     }
 }
